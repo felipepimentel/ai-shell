@@ -1,0 +1,13 @@
+pattern_handlers:
+  "command not found": "It seems the command is not available. Try installing the necessary package."
+  "permission denied": "Permission error detected. Consider running with elevated privileges (e.g., using sudo)."
+use_llm: true
+fallback_message: "An error occurred. Please check your command and try again."
+default_timeout: 10
+aliases: {}
+dangerous_commands:
+  - "rm -rf"
+  - "dd if="
+  - "mkfs"
+  - ":(){ :|:& };:"
+verbose: true

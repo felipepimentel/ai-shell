@@ -1,0 +1,40 @@
+[tool.poetry]
+name = "ai-shell"
+version = "0.1.0"
+description = "An AI-powered shell assistant"
+authors = ["Felipe Pimentel <fpimentel88@gmail.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+homepage = "https://github.com/yourusername/ai-shell"
+repository = "https://github.com/yourusername/ai-shell"
+keywords = ["ai", "shell", "assistant"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+asyncio = "^3.4.3"
+requests = "^2.32.3"
+prompt-toolkit = "^3.0.48"
+rich = "^13.9.2"
+psutil = "^6.0.0"
+pyyaml = "^6.0.2"
+aiofiles = "^24.1.0"
+
+structlog = "^24.4.0"
+shellescape = "^3.8.1"
+aiosqlite = "^0.20.0"
+aiohttp = "^3.10.9"
+python-dotenv = "^1.0.1"
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+ai-shell = "ai_shell.cli:main"
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.isort]
+profile = "black"
+line_length = 100
