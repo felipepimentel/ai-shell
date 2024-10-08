@@ -20,6 +20,8 @@ class Config:
         self.dangerous_commands_list: List[str] = self._config.get(
             "dangerous_commands", ["rm -rf", "dd if=", "mkfs", ":(){ :|:& };:"]
         )
+        self.clear_cache_command: str = "clear_cache"
+        self.clear_history_command: str = "clear_history"
 
     @staticmethod
     def _load_config(filename: str) -> Dict:

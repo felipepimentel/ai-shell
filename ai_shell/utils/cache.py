@@ -44,3 +44,9 @@ async def clean_expired_cache(expiration_time: int = 3600):
             "DELETE FROM cache WHERE ? - timestamp > ?", (time.time(), expiration_time)
         )
         await db.commit()
+
+
+async def clear_cache():
+    async with aiosqlite.connect("cache.db") as db:
+        await db.execute("DELETE FROM cache")
+        await db.commit()

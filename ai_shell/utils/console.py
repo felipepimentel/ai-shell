@@ -25,6 +25,8 @@ def display_help():
     help_table.add_row("help", "Display this help message")
     help_table.add_row("history", "Show command history")
     help_table.add_row("simulate", "Toggle simulation mode")
+    help_table.add_row("clear_cache", "Clear the command cache")
+    help_table.add_row("clear_history", "Clear the command history")
     help_table.add_row("<any text>", "Ask AI to generate and execute a command")
 
     console.print(help_table)

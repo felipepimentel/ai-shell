@@ -12,7 +12,7 @@ class OpenRouterAI:
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
 
-    async def generate_command(self, prompt, system_info):
+    async def generate_command(self, prompt):
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -22,9 +22,10 @@ class OpenRouterAI:
         data = {
             "model": "openai/gpt-4-turbo",
             "messages": [
-                {"role": "system", "content": f"System info: {system_info}"},
+                {"role": "system", "content": "You are an AI assistant that generates shell commands based on user requests. Provide only the command without any explanation. Do not include 'cd' commands or any navigation unless explicitly requested. The command should be executable as-is in the current directory."},
                 {"role": "user", "content": prompt},
             ],
+            "max_tokens": 100,  # Limit the response length
         }
         try:
             async with aiohttp.ClientSession() as session:
@@ -33,7 +34,7 @@ class OpenRouterAI:
                 ) as response:
                     if response.status == 200:
                         response_json = await response.json()
-                        return response_json["choices"][0]["message"]["content"]
+                        return response_json["choices"][0]["message"]["content"].strip()
                     else:
                         logging.error(
                             f"API Error: {response.status} - {await response.text()}"

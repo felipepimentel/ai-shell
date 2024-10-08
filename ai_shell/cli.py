@@ -10,7 +10,7 @@ from rich.console import Console
 
 from .command import CommandProcessor
 from .config import config
-from .utils.cache import clean_expired_cache, init_cache
+from .utils.cache import clean_expired_cache, clear_cache, init_cache
 from .utils.console import display_help, display_history
 from .utils.logger import setup_logging
 
@@ -26,13 +26,13 @@ class AIShell:
     async def handle_initial_command(self, args):
         if len(args) > 1:
             initial_command = " ".join(args[1:])
-            prompt_text = await self.processor.process_command(
+            output = await self.processor.process_command(
                 initial_command, self.simulation_mode
             )
-            if prompt_text:
-                console.print(f"[cyan]Next step: {prompt_text}[/cyan]")
-            return prompt_text
-        return None
+            if output:
+                console.print(f"[cyan]{output}[/cyan]")
+            return True  # Retorna True para indicar que um comando inicial foi processado
+        return False
 
     async def handle_user_input(self, session, completer):
         try:
@@ -53,6 +53,8 @@ class AIShell:
                 config.help_command,
                 config.history_command,
                 config.simulate_command,
+                config.clear_cache_command,
+                config.clear_history_command,
             ]
         )
 
@@ -62,11 +64,12 @@ class AIShell:
             f"'{config.simulate_command}' to toggle simulation mode, or start with your command."
         )
 
-        prompt_text = await self.handle_initial_command(sys.argv)
+        initial_command_processed = await self.handle_initial_command(sys.argv)
+        if initial_command_processed:
+            return  # Encerra o programa após processar o comando inicial
 
         while True:
-            if not prompt_text:
-                prompt_text = await self.handle_user_input(session, completer)
+            prompt_text = await self.handle_user_input(session, completer)
 
             if prompt_text.lower() == config.exit_command:
                 break
@@ -79,17 +82,24 @@ class AIShell:
                 console.print(
                     f"[cyan]Simulation mode {'enabled' if self.simulation_mode else 'disabled'}[/cyan]"
                 )
+            elif prompt_text.lower() == config.clear_cache_command:
+                await clear_cache()
+                console.print("[green]Cache cleared successfully.[/green]")
+            elif prompt_text.lower() == config.clear_history_command:
+                self.processor.clear_history()
+                console.print("[green]Command history cleared successfully.[/green]")
             else:
-                prompt_text = await self.processor.process_command(
+                output = await self.processor.process_command(
                     prompt_text, self.simulation_mode
                 )
-                continue
-
-            prompt_text = None
+                if output:
+                    console.print(f"[cyan]{output}[/cyan]")
 
         await self.processor.save_history()
-        clean_expired_cache()
+        await clean_expired_cache()  # Modificado para ser assíncrono
         console.print("[bold green]Thank you for using AI Shell. Goodbye![/bold green]")
+
+# ... (rest of the code remains the same)
 
 
 async def main():
