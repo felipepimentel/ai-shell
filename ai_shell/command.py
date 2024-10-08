@@ -18,13 +18,15 @@ class CommandHistoryEntry:
     output: str
     timestamp: str
     working_directory: str
-    ai_response: str
+    ai_response: str  # Para armazenar o comando gerado pela LLM
 
 
 class CommandProcessor:
     def __init__(self):
         self.history: List[CommandHistoryEntry] = []
-        self.last_generated_command: str = ""
+        self.last_generated_command: str = ""  # Armazena o último comando gerado
+        self._last_command_from_cache = False
+        self.command_cache = {}  # Adicionando um cache local
 
     async def process_command(
         self, command: str, simulation_mode: bool, verbose_mode: bool
@@ -33,9 +35,13 @@ class CommandProcessor:
             logger.debug(f"Processing command: {command}")
 
         cached_output = await check_cache(command)
-        if cached_output:
+        if cached_output and command in self.command_cache:
             logger.info(f"Using cached result for command: {command}")
+            self.last_generated_command = command
+            self._last_command_from_cache = True
             return cached_output
+
+        self._last_command_from_cache = False
 
         from .llm.prompts import generate_command_from_prompt
 
@@ -46,7 +52,7 @@ class CommandProcessor:
             return
 
         extracted_command = self.extract_command(ai_response)
-        self.last_generated_command = extracted_command
+        self.last_generated_command = extracted_command  # Salva o último comando gerado
 
         if verbose_mode:
             logger.debug(f"Generated command: {extracted_command}")
@@ -57,14 +63,19 @@ class CommandProcessor:
 
         if error:
             logger.error(f"Command error: {error}")
+            return error
         else:
             logger.info(f"Command executed successfully: {extracted_command}")
             self.append_to_history(extracted_command, output, ai_response)
-            await save_cache(command, output)
+            await save_cache(
+                command, output
+            )  # Corrigido: passando 'command' e 'output'
+            self.command_cache[command] = output  # Adicionando ao cache local
 
-        return output or error
+        return output
 
     def get_last_generated_command(self) -> str:
+        """Retorna o último comando gerado pela LLM ou o comando cacheado"""
         return self.last_generated_command
 
     async def execute_command(
@@ -77,6 +88,7 @@ class CommandProcessor:
             if verbose_mode:
                 logger.debug(f"Executing command: {command}")
 
+            # Usando subprocess.run com shell=True para maior flexibilidade
             result = subprocess.run(
                 command, shell=True, capture_output=True, text=True, timeout=30
             )
@@ -102,7 +114,7 @@ class CommandProcessor:
                 output=output,
                 timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                 working_directory=os.getcwd(),
-                ai_response=ai_response,
+                ai_response=ai_response,  # Salvar o comando da LLM
             )
         )
 
@@ -118,3 +130,6 @@ class CommandProcessor:
     async def save_history(self):
         with open("ai_command_history.json", "w") as f:
             json.dump([entry.__dict__ for entry in self.history], f)
+
+    def is_last_command_from_cache(self) -> bool:
+        return self._last_command_from_cache
