@@ -45,7 +45,10 @@ class AIShell:
                 initial_command, self.simulation_mode, self.verbose_mode
             )
             if output:
-                self.console.print(f"[cyan]{output}[/cyan]")
+                generated_command = self.processor.get_last_generated_command()
+                self.display_command_output_inline(
+                    initial_command, output, generated_command
+                )
             return True
         return False
 
@@ -57,6 +60,17 @@ class AIShell:
         except asyncio.TimeoutError:
             logger.warning("Timeout: No input provided.")
             return config.exit_command
+
+    def display_command_output_inline(
+        self, command: str, output: str, generated_command: str
+    ):
+        self.console.print(f"[bold cyan]{generated_command}[/bold cyan]")
+        self.console.print(f"[green]{output}[/green]")
+
+    def display_command_output_cli(self, command: str, output: str):
+        self.console.print(f"[bold green]Executed Command:[/bold green] {command}")
+        self.console.print("[bold blue]--- Command Output ---[/bold blue]")
+        self.console.print(output)
 
     def display_help(self):
         help_table = Table(title="AI Shell Help", box="ROUNDED")
@@ -73,18 +87,21 @@ class AIShell:
         self.console.print(help_table)
 
     def display_history(self, history: List[CommandHistoryEntry]):
-        history_table = Table(title="Command History", box="ROUNDED")
+        history_table = Table(title="Command History", box="ROUNDED", show_lines=True)
         history_table.add_column("Timestamp", style="yellow")
         history_table.add_column("Working Directory", style="blue")
         history_table.add_column("Command", style="cyan")
-        history_table.add_column("Output", style="green")
+        history_table.add_column("Output", style="green", max_width=40)
 
         for entry in list(history)[-10:]:
+            truncated_output = (
+                (entry.output[:50] + "...") if len(entry.output) > 50 else entry.output
+            )
             history_table.add_row(
                 entry.timestamp,
                 entry.working_directory,
-                entry.command,
-                entry.output[:50] + "..." if len(entry.output) > 50 else entry.output,
+                f"[bold cyan]{entry.command}[/bold cyan]",
+                truncated_output,
             )
 
         self.console.print(history_table)
@@ -118,10 +135,6 @@ class AIShell:
             f"Type '{config.exit_command}' to quit, '{config.help_command}' for assistance, "
             f"'{config.simulate_command}' to toggle simulation mode, or start with your command."
         )
-
-        initial_command_processed = await self.handle_initial_command(sys.argv)
-        if initial_command_processed:
-            return
 
         while True:
             prompt_text = await self.handle_user_input(session, get_dynamic_completer())
@@ -164,7 +177,7 @@ class AIShell:
                     prompt_text, self.simulation_mode, self.verbose_mode
                 )
                 if output:
-                    self.console.print(f"[cyan]{output}[/cyan]")
+                    self.display_command_output_cli(prompt_text, output)
 
         await self.processor.save_history()
         await clean_expired_cache()
@@ -176,7 +189,9 @@ class AIShell:
 async def main():
     shell = AIShell()
     try:
-        await shell.run_shell()
+        initial_command_processed = await shell.handle_initial_command(sys.argv)
+        if not initial_command_processed:
+            await shell.run_shell()
     except KeyboardInterrupt:
         logger.warning("Program interrupted by user")
         shell.console.print("[yellow]Program interrupted by user.[/yellow]")

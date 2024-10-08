@@ -1,17 +1,15 @@
-# logger.py
 import logging
-from functools import wraps
-from typing import Callable
 
 import structlog
-from rich.console import Console
+
+from ..config import config
 
 
 class LoggerManager:
     def __init__(self):
         self.console = None
 
-    def setup_logging(self, console: Console):
+    def setup_logging(self, console=None):
         self.console = console
         structlog.configure(
             processors=[
@@ -21,7 +19,6 @@ class LoggerManager:
                 structlog.processors.TimeStamper(fmt="iso"),
                 structlog.processors.StackInfoRenderer(),
                 structlog.processors.format_exc_info,
-                self.friendly_console_output,
                 structlog.processors.JSONRenderer(),
             ],
             context_class=dict,
@@ -33,45 +30,23 @@ class LoggerManager:
         # Remove the StreamHandler to prevent duplicate console output
         logging.basicConfig(
             format="%(message)s",
-            level=logging.INFO,
-            handlers=[logging.FileHandler("ai_shell.log")],
+            level=logging.DEBUG if config.verbose_mode else logging.INFO,
+            handlers=[logging.FileHandler("ai_shell.log")],  # Apenas log em arquivo
         )
 
-    def friendly_console_output(self, logger, method_name, event_dict):
-        level = event_dict.get("level", "INFO").upper()
-        timestamp = event_dict.get("timestamp", "N/A")
-        event = event_dict.get("event", "No message")
-        logger_name = event_dict.get("logger", "unknown")
-
-        formatted_message = f"[{timestamp}] {level} - {event} ({logger_name})"
-        if self.console:
-            self.console.print(formatted_message, style=level.lower())
-
-        return event_dict
-
     def get_logger(self, name: str):
-        return structlog.get_logger(name)
+        logger = structlog.get_logger(name)
+        if config.verbose_mode:
+            logger = logger.bind(verbose=True)
+        return logger
 
 
 logger_manager = LoggerManager()
 
 
-def setup_logging(console: Console):
+def setup_logging(console=None):
     logger_manager.setup_logging(console)
 
 
 def get_logger(name: str):
     return logger_manager.get_logger(name)
-
-
-def exception_handler(func: Callable):
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        try:
-            return await func(*args, **kwargs)
-        except Exception as e:
-            logger = get_logger(func.__name__)
-            logger.exception(f"Exception in {func.__name__}: {str(e)}")
-            return None, f"An error occurred: {str(e)}"
-
-    return wrapper

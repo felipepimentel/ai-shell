@@ -1,7 +1,6 @@
-import asyncio
 import json
 import os
-import shlex
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import List, Tuple
@@ -19,47 +18,13 @@ class CommandHistoryEntry:
     output: str
     timestamp: str
     working_directory: str
+    ai_response: str
 
 
 class CommandProcessor:
     def __init__(self):
         self.history: List[CommandHistoryEntry] = []
-
-    async def execute_command(
-        self, command: str, simulation_mode: bool = False, verbose_mode: bool = False
-    ) -> Tuple[str | None, str | None]:
-        if simulation_mode:
-            return f"[Simulation] Would execute: {command}", None
-
-        try:
-            command_parts = shlex.split(command)
-            if verbose_mode:
-                logger.debug(f"Executing command: {command_parts}")
-
-            process = await asyncio.create_subprocess_exec(
-                *command_parts,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=30
-                )
-            except asyncio.TimeoutError:
-                return None, "Command execution timed out."
-
-            if process.returncode == 0:
-                return stdout.decode("utf-8").strip(), None
-            else:
-                return None, stderr.decode("utf-8").strip()
-
-        except FileNotFoundError:
-            return None, "Command not found."
-        except PermissionError:
-            return None, "Permission denied."
-        except Exception as e:
-            return None, f"Command execution failed: {str(e)}"
+        self.last_generated_command: str = ""
 
     async def process_command(
         self, command: str, simulation_mode: bool, verbose_mode: bool
@@ -81,6 +46,8 @@ class CommandProcessor:
             return
 
         extracted_command = self.extract_command(ai_response)
+        self.last_generated_command = extracted_command
+
         if verbose_mode:
             logger.debug(f"Generated command: {extracted_command}")
 
@@ -92,18 +59,50 @@ class CommandProcessor:
             logger.error(f"Command error: {error}")
         else:
             logger.info(f"Command executed successfully: {extracted_command}")
-            self.append_to_history(extracted_command, output)
+            self.append_to_history(extracted_command, output, ai_response)
             await save_cache(command, output)
 
         return output or error
 
-    def append_to_history(self, command: str, output: str):
+    def get_last_generated_command(self) -> str:
+        return self.last_generated_command
+
+    async def execute_command(
+        self, command: str, simulation_mode: bool = False, verbose_mode: bool = False
+    ) -> Tuple[str | None, str | None]:
+        if simulation_mode:
+            return f"[Simulation] Would execute: {command}", None
+
+        try:
+            if verbose_mode:
+                logger.debug(f"Executing command: {command}")
+
+            result = subprocess.run(
+                command, shell=True, capture_output=True, text=True, timeout=30
+            )
+
+            if result.returncode == 0:
+                return result.stdout.strip(), None
+            else:
+                return None, result.stderr.strip()
+
+        except subprocess.TimeoutExpired:
+            return None, "Command execution timed out."
+        except FileNotFoundError:
+            return None, "Command not found."
+        except PermissionError:
+            return None, "Permission denied."
+        except Exception as e:
+            return None, f"Command execution failed: {str(e)}"
+
+    def append_to_history(self, command: str, output: str, ai_response: str = None):
         self.history.append(
             CommandHistoryEntry(
                 command=command,
                 output=output,
                 timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
                 working_directory=os.getcwd(),
+                ai_response=ai_response,
             )
         )
 
