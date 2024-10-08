@@ -9,7 +9,7 @@ from rich.console import Console
 
 class LoggerManager:
     def __init__(self):
-        pass
+        self.console = None
 
     def setup_logging(self, console: Console):
         self.console = console
@@ -30,10 +30,11 @@ class LoggerManager:
             cache_logger_on_first_use=True,
         )
 
+        # Remove the StreamHandler to prevent duplicate console output
         logging.basicConfig(
             format="%(message)s",
             level=logging.INFO,
-            handlers=[logging.StreamHandler(), logging.FileHandler("ai_shell.log")],
+            handlers=[logging.FileHandler("ai_shell.log")],
         )
 
     def friendly_console_output(self, logger, method_name, event_dict):
@@ -43,7 +44,8 @@ class LoggerManager:
         logger_name = event_dict.get("logger", "unknown")
 
         formatted_message = f"[{timestamp}] {level} - {event} ({logger_name})"
-        self.console.print(formatted_message, style=level.lower())
+        if self.console:
+            self.console.print(formatted_message, style=level.lower())
 
         return event_dict
 

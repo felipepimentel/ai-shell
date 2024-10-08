@@ -36,6 +36,7 @@ class AIShell:
         )
         self.console = Console(theme=theme)
         setup_logging(self.console)
+        self.logger = get_logger("ai_shell.cli")
 
     async def handle_initial_command(self, args):
         if len(args) > 1:
@@ -108,6 +109,12 @@ class AIShell:
 
         self.console.print("[bold green]Welcome to AI Shell![/bold green]")
         self.console.print(
+            f"Type '{config.exit_command}' to quit, '{config.help_command}' for assistance, "
+            f"'{config.simulate_command}' to toggle simulation mode, or start with your command."
+        )
+
+        self.logger.info("Welcome to AI Shell!")
+        self.logger.info(
             f"Type '{config.exit_command}' to quit, '{config.help_command}' for assistance, "
             f"'{config.simulate_command}' to toggle simulation mode, or start with your command."
         )
