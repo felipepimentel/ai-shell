@@ -15,6 +15,7 @@ class Config:
         self.simulate_command: str = "simulate"
         self.prompt_timeout: int = 30
         self.default_timeout: int = self._config.get("default_timeout", 10)
+        self.verbose_mode: bool = self._config.get("verbose_mode", False)
         self.aliases: Dict[str, str] = self._config.get("aliases", {})
         self.simulation_mode: bool = False
         self.dangerous_commands_list: List[str] = self._config.get(

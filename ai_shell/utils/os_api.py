@@ -1,13 +1,16 @@
 import os
 import platform
 import pwd
+import asyncio
 
-
-def get_system_info():
+async def get_system_info():
     try:
         user = os.getlogin()
     except OSError:
         user = pwd.getpwuid(os.getuid())[0]
+
+    # Simulando uma operação assíncrona
+    await asyncio.sleep(0)
 
     return {
         "os": platform.system(),

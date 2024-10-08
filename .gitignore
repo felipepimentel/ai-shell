@@ -170,3 +170,5 @@ cache.db
 command_history.json
 
 ai_response_history.json
+
+ai_command_history.json

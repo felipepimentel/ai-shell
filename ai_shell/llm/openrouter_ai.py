@@ -1,10 +1,13 @@
-import logging
 import os
 
 import aiohttp
 from dotenv import load_dotenv
 
+from ai_shell.utils.logger import get_logger
+
 load_dotenv()
+
+logger = get_logger("ai_shell.llm.openrouter_ai")
 
 
 class OpenRouterAI:
@@ -20,12 +23,11 @@ class OpenRouterAI:
             "X-Title": "AI Shell",
         }
         data = {
-            "model": "openai/gpt-4-turbo",
+            "model": "openai/gpt-4o-mini",
             "messages": [
-                {"role": "system", "content": "You are an AI assistant that generates shell commands based on user requests. Provide only the command without any explanation. Do not include 'cd' commands or any navigation unless explicitly requested. The command should be executable as-is in the current directory."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": prompt},
             ],
-            "max_tokens": 100,  # Limit the response length
+            "max_tokens": 100,
         }
         try:
             async with aiohttp.ClientSession() as session:
@@ -36,10 +38,10 @@ class OpenRouterAI:
                         response_json = await response.json()
                         return response_json["choices"][0]["message"]["content"].strip()
                     else:
-                        logging.error(
+                        logger.error(
                             f"API Error: {response.status} - {await response.text()}"
                         )
                         return None
         except aiohttp.ClientError as e:
-            logging.error(f"Connection error: {e}")
+            logger.error(f"Connection error: {e}")
             return None

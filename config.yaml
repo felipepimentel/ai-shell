@@ -4,7 +4,9 @@ pattern_handlers:
 use_llm: true
 fallback_message: "An error occurred. Please check your command and try again."
 default_timeout: 10
-aliases: {}
+verbose_mode: true
+aliases:
+  ll: ls -la
 dangerous_commands:
   - "rm -rf"
   - "dd if="
