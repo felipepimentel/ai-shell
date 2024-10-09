@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 from typing import Tuple
 
@@ -30,20 +32,20 @@ async def check_cache(prompt: str) -> Tuple[str | None, str | None]:
 
         if result:
             generated_command, output, timestamp = result
-            if time.time() - timestamp < 3600:  # 1 hora de expiração
+            if time.time() - timestamp < 3600:
                 return generated_command, output
             else:
-                print("Cache expirado.")
+                pass
         else:
-            print(f"Nenhum resultado encontrado no cache para o prompt: {prompt}")
+            pass
     return None, None
 
 
-async def save_cache(command: str, output: str):
+async def save_cache(command: str, generated_command: str, output: str):
     async with aiosqlite.connect("cache.db") as db:
         await db.execute(
             "INSERT OR REPLACE INTO cache (prompt, generated_command, output, timestamp) VALUES (?, ?, ?, ?)",
-            (command, None, output, time.time()),
+            (command, generated_command, output, time.time()),
         )
         await db.commit()
 

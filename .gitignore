@@ -172,3 +172,4 @@ command_history.json
 ai_response_history.json
 
 ai_command_history.json
+last_prompt_used.json
