@@ -1,8 +1,26 @@
 import logging
+import traceback
+from contextlib import asynccontextmanager
 
 import structlog
+from rich.console import Console
 
 from ..config import config
+
+
+class ErrorHandler:
+    def __init__(self, console: Console):
+        self.console = console
+
+    @asynccontextmanager
+    async def catch_errors(self):
+        try:
+            yield
+        except (KeyboardInterrupt, SystemExit):
+            self.console.print("[red]Execution interrupted.[/red]")
+        except Exception as e:
+            self.console.print(f"[red]Unexpected error: {str(e)}[/red]")
+            traceback.print_exc()
 
 
 class LoggerManager:

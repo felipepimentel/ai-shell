@@ -19,14 +19,13 @@ from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.theme import Theme
 
-from .command import CommandProcessor
+from .CommandProcessor import CommandProcessor
 from .config import config
-from .models import CommandHistoryEntry
+from .datatypes import CommandHistoryEntry
 from .utils.cache import clean_expired_cache, clear_cache, init_cache
 from .utils.logger import get_logger, setup_logging
 
@@ -103,7 +102,9 @@ class AIShell:
                 self.display_command_output_inline(
                     initial_command, output, generated_command
                 )
-            if hasattr(self.processor, 'save_history') and callable(self.processor.save_history):
+            if hasattr(self.processor, "save_history") and callable(
+                self.processor.save_history
+            ):
                 await self.processor.save_history()
             return True
         return False
@@ -146,11 +147,11 @@ class AIShell:
     async def process_command(self, command: str):
         async with self.error_handler():
             self.console.print("[cyan]Processing command...[/cyan]")
-            
+
             output = await self.processor.process_command(
                 command, self.simulation_mode, self.verbose_mode
             )
-            
+
             if output:
                 self.console.print("[green]Command executed successfully[/green]")
                 generated_command = self.processor.get_last_generated_command()
@@ -158,7 +159,9 @@ class AIShell:
             else:
                 self.console.print("[red]Command execution failed[/red]")
 
-            await self.processor.save_history()  # Aguarda explicitamente o salvamento do histórico
+            await (
+                self.processor.save_history()
+            )  # Aguarda explicitamente o salvamento do histórico
 
         return output
 
@@ -394,20 +397,22 @@ class AIShell:
         try:
             # Limpar cache
             await clear_cache()
-            
+
             # Limpar histórico
             if os.path.exists("ai_command_history.json"):
                 os.remove("ai_command_history.json")
-            
+
             # Limpar logs
             if os.path.exists("ai_shell.log"):
                 os.remove("ai_shell.log")
-            
+
             # Limpar último prompt usado
             if os.path.exists("last_prompt_used.json"):
                 os.remove("last_prompt_used.json")
-            
-            self.console.print("[green]All cache, history, logs, and last prompt data have been cleared.[/green]")
+
+            self.console.print(
+                "[green]All cache, history, logs, and last prompt data have been cleared.[/green]"
+            )
         except Exception as e:
             self.console.print(f"[red]Error while clearing data: {str(e)}[/red]")
 

@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from typing import Dict, List, Optional, Tuple
 
+from ai_shell.utils.cache import check_cache, save_cache
 from ai_shell.utils.logger import get_logger
 
-from ..models import CommandHistoryEntry
+from ..datatypes import CommandHistoryEntry
 from ..utils.os_api import get_system_info
 from .openrouter_ai import OpenRouterAI
 
@@ -14,7 +15,7 @@ logger = get_logger("ai_shell.llm.prompts")
 ai = OpenRouterAI()
 
 COMMAND_GENERATION_PROMPT = """
-You are an AI assistant that generates concise, executable shell scripts based on user requests. Your task is to output a minimal, efficient script that fulfills the user's request accurately and safely.
+You are an AI assistant that generates concise, executable shell scripts based on user requests. Your task is to output a minimal, efficient script that fulfills the user's request accurately and safely, ensuring compatibility across different operating systems.
 
 Guidelines:
 
@@ -37,6 +38,8 @@ Guidelines:
 
 5. Compatibility:
    - Use POSIX-compliant syntax unless specifically required otherwise.
+   - Check the operating system (using uname or similar) and provide alternative commands for different OSes when necessary.
+   - For Windows compatibility, consider providing PowerShell alternatives in comments.
 
 6. Security and Safety:
    - Always prompt for user confirmation before performing destructive operations (e.g., deleting files or directories).
@@ -48,12 +51,23 @@ Guidelines:
    - When the --clear-all flag is present, still prompt the user before clearing or overwriting existing content.
    - The flag should indicate a preference for clearing, but not bypass user confirmation.
 
+8. User Input Handling:
+   - When user input is required, use the following format: echo "USER_INPUT:Prompt message" >&2
+   - Immediately after requesting user input, provide a way to handle the input or cancel the operation.
+   - Avoid situations where the script might get stuck waiting for user input indefinitely.
+
+9. Cross-platform Considerations:
+   - Use portable commands and utilities available on most Unix-like systems.
+   - When using system-specific commands, provide alternatives or checks for different operating systems.
+   - Consider file path differences (e.g., forward slashes for Unix, backslashes for Windows).
+
 Generate a minimal, executable shell script to fulfill this request:
 {user_command}
 
 Context:
 {context}
 """
+
 
 async def build_contextual_prompt(
     history: List[CommandHistoryEntry],
@@ -73,7 +87,7 @@ async def build_contextual_prompt(
         )
 
     system_info = await get_system_info()
-    structured_prompt += f"\nSystem Info:\n{system_info}\n"
+    structured_prompt += f"\nSystem Info:\n{json.dumps(system_info, indent=2)}\n"
 
     if enhanced_context:
         structured_prompt += "\nAdditional Context:\n"
@@ -128,20 +142,33 @@ async def generate_command_from_prompt(
     user_command: str,
     history: List[CommandHistoryEntry],
     enhanced_context: Dict = None,
-    max_entries: int = 5
+    max_entries: int = 5,
 ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
     try:
+        # Check cache first
+        cached_command, cached_output = await check_cache(user_command)
+        if cached_command and cached_output:
+            logger.info("Using cached command and output")
+            return cached_command, None, "cached"
+
         full_prompt = await build_full_prompt(
             user_command, history, enhanced_context, max_entries
         )
-        logger.debug(f"Prompt generated (first 100 chars): {full_prompt[:100]}...")
+        logger.debug(f"Full prompt generated (first 100 chars): {full_prompt[:100]}...")
+        logger.info("Sending prompt to AI for command generation")
         response, tokens_used, model_used = await ai.generate_command(full_prompt)
-        if response:
-            logger.info(f"Script generated. Tokens: {tokens_used}, Model: {model_used}")
+        if response and response.strip():
+            logger.info(
+                f"Script generated successfully. Tokens: {tokens_used}, Model: {model_used}"
+            )
             logger.debug(f"Generated script (first 100 chars): {response[:100]}...")
+            # Save to cache
+            await save_cache(user_command, response, "")
             return response, tokens_used, model_used
         else:
-            logger.error("Failed to generate script. AI returned empty response.")
+            logger.error(
+                "Failed to generate script. AI returned empty or invalid response."
+            )
             return None, None, None
     except Exception as e:
         logger.exception(f"Error in generate_command_from_prompt: {str(e)}")
