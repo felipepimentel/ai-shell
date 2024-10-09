@@ -14,74 +14,46 @@ logger = get_logger("ai_shell.llm.prompts")
 ai = OpenRouterAI()
 
 COMMAND_GENERATION_PROMPT = """
-You are an AI assistant integrated into a system that generates and executes shell commands based on user requests. 
-Your task is to output a complete, executable shell script that accurately fulfills the user's request, considering potential issues and providing appropriate checks and error handling.
+You are an AI assistant that generates concise, executable shell scripts based on user requests. Your task is to output a minimal, efficient script that fulfills the user's request accurately and safely.
 
 Guidelines:
 
-1. Script Completeness:
-   - Ensure that the script is complete and properly formatted.
-   - All opening brackets, parentheses, and quotes must have corresponding closing ones.
-   - All functions, if statements, case statements, and loops must be properly closed.
-   - The script must have a clear beginning and end.
-   - Do not include any markdown formatting, code block delimiters (```), or explanatory comments at the beginning of the script.
+1. Script Structure:
+   - Start with #!/bin/sh for POSIX compatibility.
+   - Use functions for complex operations.
 
-2. Safety and Precautions:
-   - Include checks for existing files/directories before operations that might overwrite or conflict.
-   - Use conditional statements to handle potential errors and unexpected situations.
-   - Avoid commands that could lead to data loss or system instability.
-   - Always check for necessary permissions before executing privileged operations.
-   - Validate and sanitize user inputs to prevent injection attacks.
+2. Efficiency and Brevity:
+   - Generate the shortest possible script that accomplishes the task safely.
+   - Use built-in shell features instead of external commands when possible.
 
-3. Script Structure:
-   - Start the script with #!/bin/sh (for POSIX compatibility) or #!/bin/bash if bash-specific features are required.
-   - Ensure all conditional statements (if, elif, else) are properly closed with 'fi'.
-   - Ensure all case statements are properly closed with 'esac'.
-   - Use functions for complex operations to improve readability and reusability.
-   - Make sure all functions are properly closed.
+3. Error Handling:
+   - Use set -e at the beginning to exit on any error.
+   - For critical errors, use: echo "FATAL:Error message" >&2; exit 1
+   - For user input: echo "USER_INPUT:Prompt [options]" >&2; read -r var_name
 
-4. Cross-Platform Compatibility:
-   - Use commands and syntax compatible with POSIX shell (sh) for maximum compatibility.
-   - When OS-specific features are needed, include checks and alternatives for different systems (Linux, macOS, Windows).
+4. Output:
+   - Use echo "INFO:Message" for important information.
+   - Use echo "WARNING:Message" >&2 for warnings.
 
-5. Error Handling:
-   - Implement comprehensive error handling with informative error messages.
-   - Use exit codes to indicate different types of errors.
-   - Consider using 'set -e' at the beginning of the script to exit on any error.
+5. Compatibility:
+   - Use POSIX-compliant syntax unless specifically required otherwise.
 
-6. User Interaction:
-   - For user input, use the 'read' command with clear and informative prompts.
-   - Provide options to skip or cancel operations that might be destructive.
+6. Security and Safety:
+   - Always prompt for user confirmation before performing destructive operations (e.g., deleting files or directories).
+   - Use the USER_INPUT mechanism for all user interactions.
+   - Sanitize and quote variables to prevent injection.
+   - Avoid using eval or other potentially dangerous constructs.
 
-7. Output and Logging:
-   - Use echo statements to keep the user informed about the script's progress.
-   - Consider implementing a simple logging mechanism for complex operations.
+7. Handling the --clear-all flag:
+   - When the --clear-all flag is present, still prompt the user before clearing or overwriting existing content.
+   - The flag should indicate a preference for clearing, but not bypass user confirmation.
 
-8. Error Classification and User Interaction:
-   - Classify potential errors or situations that require user input into the following categories:
-     a) FATAL: Errors that prevent the operation from continuing and require immediate termination.
-     b) USER_INPUT: Situations where user input is required to proceed.
-     c) WARNING: Non-critical issues that the user should be aware of but don't necessarily prevent execution.
-     d) INFO: Informational messages about the script's progress.
-   - For USER_INPUT situations, provide clear options for the user, always including 'skip' and 'cancel' as possible choices.
-   - Use the following format for error classification and user interaction:
-     echo "ERROR_TYPE:MESSAGE" >&2
-     For example:
-     echo "USER_INPUT:The directory already exists. What would you like to do? [overwrite/skip/cancel]" >&2
+Generate a minimal, executable shell script to fulfill this request:
+{user_command}
 
-9. Script Output:
-   - Ensure all important information, warnings, and errors are output to stderr using >&2.
-   - Use echo statements to keep the user informed about the script's progress.
-
-Please provide your response as a complete, executable shell script, starting directly with #!/bin/sh or #!/bin/bash. Do not include any markdown formatting, code block delimiters, or explanatory comments at the beginning of the script.
-
+Context:
 {context}
-
-User's current request: '{user_command}'
-
-Generate a complete, executable shell script to fulfill this request, following the guidelines above:
 """
-
 
 async def build_contextual_prompt(
     history: List[CommandHistoryEntry],
@@ -156,22 +128,20 @@ async def generate_command_from_prompt(
     user_command: str,
     history: List[CommandHistoryEntry],
     enhanced_context: Dict = None,
-    max_entries: int = 10,
+    max_entries: int = 5
 ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
     try:
         full_prompt = await build_full_prompt(
             user_command, history, enhanced_context, max_entries
         )
-        logger.debug(f"Full prompt generated: {full_prompt[:100]}...")  # Log the first 100 characters of the prompt
+        logger.debug(f"Prompt generated (first 100 chars): {full_prompt[:100]}...")
         response, tokens_used, model_used = await ai.generate_command(full_prompt)
         if response:
-            logger.info(
-                f"Commands generated successfully. Tokens used: {tokens_used}, Model: {model_used}"
-            )
-            logger.debug(f"Generated response: {response[:100]}...")  # Log the first 100 characters of the response
+            logger.info(f"Script generated. Tokens: {tokens_used}, Model: {model_used}")
+            logger.debug(f"Generated script (first 100 chars): {response[:100]}...")
             return response, tokens_used, model_used
         else:
-            logger.error("Failed to generate commands. AI returned empty response.")
+            logger.error("Failed to generate script. AI returned empty response.")
             return None, None, None
     except Exception as e:
         logger.exception(f"Error in generate_command_from_prompt: {str(e)}")

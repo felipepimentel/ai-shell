@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-import aiohttp
 import json
 import os
 import re
 import subprocess
-import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import tempfile
+import time
 from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from rich.prompt import Prompt, Confirm
+import aiohttp
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Prompt
+from rich.live import Live
 
 from .config import config
 from .llm.prompts import generate_command_from_prompt
@@ -21,8 +25,6 @@ from .utils.logger import get_logger
 
 if TYPE_CHECKING:
     from subprocess import CompletedProcess
-
-    from rich.console import Console
 
 logger = get_logger("ai_shell.command")
 
@@ -37,12 +39,12 @@ class ErrorType(Enum):
 
 
 class CommandProcessor:
-    def __init__(self, console: "Console") -> None:
+    def __init__(self, console: Console) -> None:
         self.history: List[CommandHistoryEntry] = []
         self.last_generated_command: str = ""
         self._last_command_from_cache: bool = False
         self.command_cache: Dict[str, str] = {}
-        self.console: "Console" = console
+        self.console: Console = console
 
     async def process_command(
         self, command: str, simulation_mode: bool, verbose_mode: bool
@@ -61,63 +63,73 @@ class CommandProcessor:
             )
             return cached_output
 
-        for retry in range(MAX_RETRIES):
-            try:
-                logger.debug(f"Attempt {retry + 1}: Generating AI response")
-                ai_response, tokens_used, model_used = await self.generate_ai_response(command)
-                if not ai_response:
-                    error_message = "Failed to generate AI response"
-                    self.console.print(f"[red]{error_message}[/red]")
-                    logger.error(f"Attempt {retry + 1}: {error_message}")
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+            transient=True,
+        )
+        task = progress.add_task("Processing...", total=None)
+
+        with Live(progress, console=self.console, refresh_per_second=10):
+            for retry in range(MAX_RETRIES):
+                try:
+                    progress.update(task, description=f"Attempt {retry + 1}: Generating AI response...")
+                    ai_response, tokens_used, model_used = await self.generate_ai_response(command)
+                    if not ai_response:
+                        progress.update(task, description=f"Attempt {retry + 1}: Failed to generate AI response")
+                        logger.error(f"Attempt {retry + 1}: Failed to generate AI response")
+                        if retry < MAX_RETRIES - 1:
+                            progress.update(task, description=f"Retrying (Attempt {retry + 2}/{MAX_RETRIES})...")
+                            await asyncio.sleep(1)  # Breve pausa antes de tentar novamente
+                            continue
+                        self.append_to_history(command, "", None, "Error", "Failed to generate AI response",
+                                               used_cache=False, tokens_used=tokens_used, model_used=model_used)
+                        return None
+
+                    progress.update(task, description="Extracting commands...")
+                    commands = self.extract_commands(ai_response)
+                    self.last_generated_command = ai_response
+
+                    if verbose_mode:
+                        logger.debug(f"Generated commands: {commands}")
+
+                    progress.update(task, description="Executing generated commands...")
+                    output = await self.execute_commands(commands, simulation_mode, verbose_mode, progress, task)
+
+                    if output.startswith("Error:"):
+                        logger.error(f"Command execution failed: {output}")
+                        if "Command execution timed out" in output:
+                            progress.update(task, description="Command execution timed out")
+                            self.append_to_history(command, output, ai_response, "Timeout", output,
+                                                   used_cache=False, tokens_used=tokens_used, model_used=model_used)
+                            return output
+                        if retry < MAX_RETRIES - 1:
+                            progress.update(task, description=f"Attempt {retry + 1} failed. Retrying...")
+                            command = f"The previous command failed with the following error: {output}\n" \
+                                      f"Please provide a corrected version of the command to address this error " \
+                                      f"and continue with the original request: {command}"
+                            await asyncio.sleep(1)  # Breve pausa antes de tentar novamente
+                            continue
+                        else:
+                            progress.update(task, description="Max retries reached. Command execution failed.")
+
+                    await self.handle_command_output(command, output, ai_response, tokens_used, model_used)
+                    progress.update(task, description="Command executed successfully")
+                    return output
+
+                except Exception as e:
+                    error_message = f"An error occurred: {str(e)}"
+                    logger.exception(f"Attempt {retry + 1}: {error_message}")
+                    progress.update(task, description=f"Error: {error_message}")
                     if retry < MAX_RETRIES - 1:
-                        self.console.print(f"[yellow]Retrying (Attempt {retry + 2}/{MAX_RETRIES})...[/yellow]")
-                        continue
-                    self.append_to_history(command, "", None, "Error", error_message,
-                                            used_cache=False, tokens_used=tokens_used, model_used=model_used)
-                    return None
-
-                logger.debug(f"AI response generated successfully: {ai_response[:100]}...")
-
-                commands = self.extract_commands(ai_response)
-                self.last_generated_command = ai_response
-
-                if verbose_mode:
-                    logger.debug(f"Generated commands: {commands}")
-
-                output = await self.execute_commands(commands, simulation_mode, verbose_mode)
-
-                if output.startswith("Error:"):
-                    logger.error(f"Command execution failed: {output}")
-                    if "Command execution timed out" in output:
-                        error_message = "Command execution timed out. The operation might be taking longer than expected."
-                        self.console.print(f"[yellow]{error_message}[/yellow]")
-                        self.append_to_history(command, output, ai_response, "Timeout", error_message,
-                                                used_cache=False, tokens_used=tokens_used, model_used=model_used)
-                        return output
-                    if retry < MAX_RETRIES - 1:
-                        self.console.print(f"[yellow]Attempt {retry + 1} failed. Retrying...[/yellow]")
-                        command = f"The previous command failed with the following error: {output}\n" \
-                                  f"Please provide a corrected version of the command to address this error " \
-                                  f"and continue with the original request: {command}"
-                        continue
+                        progress.update(task, description=f"Retrying (Attempt {retry + 2}/{MAX_RETRIES})...")
+                        await asyncio.sleep(1)  # Breve pausa antes de tentar novamente
                     else:
-                        self.console.print("[red]Max retries reached. Command execution failed.[/red]")
-
-                await self.handle_command_output(command, output, ai_response, tokens_used, model_used)
-
-                return output
-
-            except Exception as e:
-                error_message = f"An error occurred: {str(e)}"
-                logger.exception(f"Attempt {retry + 1}: {error_message}")
-                self.console.print(f"[red]{error_message}[/red]")
-                if retry < MAX_RETRIES - 1:
-                    self.console.print(f"[yellow]Retrying (Attempt {retry + 2}/{MAX_RETRIES})...[/yellow]")
-                else:
-                    self.console.print("[red]Max retries reached. Command execution failed.[/red]")
-                    self.append_to_history(command, "", None, "Error", error_message,
-                                           used_cache=False, tokens_used=None, model_used=None)
-                    return None
+                        progress.update(task, description="Max retries reached. Command execution failed.")
+                        self.append_to_history(command, "", None, "Error", error_message,
+                                               used_cache=False, tokens_used=None, model_used=None)
+                        return None
 
         return None
 
@@ -139,10 +151,14 @@ class CommandProcessor:
         self._last_command_from_cache = False
         return None, None
 
-    async def generate_ai_response(self, command: str) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+    async def generate_ai_response(
+        self, command: str
+    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
         context = self.build_enhanced_context()
         try:
-            ai_response, tokens_used, model_used = await generate_command_from_prompt(command, self.history, context)
+            ai_response, tokens_used, model_used = await generate_command_from_prompt(
+                command, self.history, context
+            )
             if not ai_response:
                 error_message = "AI failed to generate a response."
                 self.console.print(f"[red]Error: {error_message}[/red]")
@@ -172,28 +188,32 @@ class CommandProcessor:
         # Join all lines into a single script
         script = "\n".join(lines)
 
-        # Check if the script is complete
-        if not script.strip().endswith("}"):
-            self.console.print("[yellow]Warning: The generated script appears to be incomplete.[/yellow]")
+        # Check if the script is non-empty and contains actual commands
+        if not script.strip() or all(line.strip().startswith("#") for line in lines):
+            self.console.print(
+                "[yellow]Warning: The generated script appears to be empty or contains only comments.[/yellow]"
+            )
+            return []
 
         # Return the entire script as a single command
-        return [script] if script.strip() else []
+        return [script]
 
     def validate_script(self, script: str) -> bool:
-        with tempfile.NamedTemporaryFile(mode='w+', suffix='.sh', delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".sh", delete=False
+        ) as temp_file:
             temp_file.write(script)
             temp_file_path = temp_file.name
 
         try:
             result = subprocess.run(
-                ['sh', '-n', temp_file_path],
-                capture_output=True,
-                text=True,
-                check=True
+                ["sh", "-n", temp_file_path], capture_output=True, text=True, check=True
             )
             return True
         except subprocess.CalledProcessError as e:
-            self.console.print(f"[red]Script validation error: {e.stderr.strip()}[/red]")
+            self.console.print(
+                f"[red]Script validation error: {e.stderr.strip()}[/red]"
+            )
             return False
         finally:
             os.unlink(temp_file_path)
@@ -203,17 +223,14 @@ class CommandProcessor:
         commands: List[str],
         simulation_mode: bool = False,
         verbose_mode: bool = False,
+        progress: Optional[Progress] = None,
+        task: Optional[Any] = None,
     ) -> str:
         output = []
-        
-        for i, command in enumerate(commands, 1):
-            self.console.print(f"[cyan]Validating and executing command {i}/{len(commands)}[/cyan]")
 
-            if not self.validate_script(command):
-                error_message = f"Error: Invalid or incomplete script in command {i}"
-                output.append(error_message)
-                self.console.print(f"[red]{error_message}[/red]")
-                return "\n".join(output)
+        for i, command in enumerate(commands, 1):
+            if progress and task:
+                progress.update(task, description=f"Executing command {i}/{len(commands)}...")
 
             if simulation_mode:
                 output.append(f"[Simulation] Would execute:\n{command}")
@@ -223,52 +240,54 @@ class CommandProcessor:
                 if verbose_mode:
                     logger.debug(f"Executing command:\n{command}")
 
-                with tempfile.NamedTemporaryFile(mode='w+', suffix='.sh', delete=False) as temp_file:
+                with tempfile.NamedTemporaryFile(
+                    mode="w+", suffix=".sh", delete=False
+                ) as temp_file:
                     temp_file.write(command)
                     temp_file_path = temp_file.name
 
-                result = subprocess.run(
-                    ['sh', temp_file_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=300  # Aumentado para 5 minutos
+                process = await asyncio.create_subprocess_shell(
+                    f"sh {temp_file_path}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
 
-                os.unlink(temp_file_path)
+                while True:
+                    try:
+                        stdout_data, stderr_data = await asyncio.wait_for(
+                            process.communicate(), timeout=1.0
+                        )
+                        break
+                    except asyncio.TimeoutError:
+                        if process.stdout:
+                            chunk = await process.stdout.read(1024)
+                            if chunk:
+                                self.console.print(chunk.decode(), end="")
+                        if process.stderr:
+                            chunk = await process.stderr.read(1024)
+                            if chunk:
+                                error_type, message = self.classify_error(chunk.decode())
+                                if error_type == ErrorType.USER_INPUT:
+                                    user_choice = self.handle_user_input(message)
+                                    process.stdin.write(f"{user_choice}\n".encode())
+                                    await process.stdin.drain()
+                                else:
+                                    self.console.print(f"[red]{message}[/red]")
 
-                stdout_lines = result.stdout.strip().split('\n')
-                stderr_lines = result.stderr.strip().split('\n')
-
-                for line in stdout_lines:
-                    output.append(line)
-
-                for line in stderr_lines:
-                    error_type, message = self.classify_error(line)
-                    if error_type == ErrorType.USER_INPUT:
-                        user_choice = self.handle_user_input(message)
-                        if user_choice == "cancel":
-                            return "\n".join(output + ["Operation cancelled by user."])
-                        elif user_choice == "skip":
-                            break
-                        else:
-                            # Handle other user choices here
-                            pass
-                    elif error_type == ErrorType.FATAL:
-                        return "\n".join(output + [f"Fatal error: {message}"])
-                    elif error_type == ErrorType.WARNING:
-                        self.console.print(f"[yellow]Warning: {message}[/yellow]")
-                    elif error_type == ErrorType.INFO:
-                        self.console.print(f"[cyan]Info: {message}[/cyan]")
-                    output.append(line)
-
-                if result.returncode != 0:
-                    error_output = f"Error: Command exited with status {result.returncode}"
+                if process.returncode == 0:
+                    output.extend(stdout_data.decode().strip().split("\n"))
+                else:
+                    error_output = f"Error: Command exited with status {process.returncode}\n{stderr_data.decode().strip()}"
                     output.append(error_output)
                     logger.error(error_output)
                     break
 
-            except subprocess.TimeoutExpired:
-                error_message = "Error: Command execution timed out."
+                os.unlink(temp_file_path)
+
+            except asyncio.TimeoutError:
+                process.terminate()
+                await process.wait()
+                error_message = f"Error: Command execution timed out after {config.default_timeout} seconds."
                 output.append(error_message)
                 logger.error(error_message)
                 break
@@ -293,8 +312,12 @@ class CommandProcessor:
             return ErrorType.INFO, error_line
 
     def handle_user_input(self, message: str) -> str:
-        options = message.split('[')[-1].split(']')[0].split('/')
-        options = options + ['skip', 'cancel'] if 'skip' not in options or 'cancel' not in options else options
+        options = message.split("[")[-1].split("]")[0].split("/")
+        options = (
+            options + ["skip", "cancel"]
+            if "skip" not in options or "cancel" not in options
+            else options
+        )
         choice = Prompt.ask(message, choices=options)
         return choice
 
@@ -334,16 +357,29 @@ class CommandProcessor:
         return "\n".join(context)
 
     async def handle_command_output(
-        self, command: str, output: str, ai_response: str, tokens_used: Optional[int], model_used: Optional[str]
+        self,
+        command: str,
+        output: str,
+        ai_response: str,
+        tokens_used: Optional[int],
+        model_used: Optional[str],
     ) -> None:
         success = not output.startswith("Error:")
         status = "Success" if success else "Error"
         error_message = output if not success else None
-        
-        logger.info("Commands executed successfully" if success else "Command execution failed")
+
+        logger.info(
+            "Commands executed successfully" if success else "Command execution failed"
+        )
         self.append_to_history(
-            command, output, ai_response, status, error_message,
-            used_cache=False, tokens_used=tokens_used, model_used=model_used
+            command,
+            output,
+            ai_response,
+            status,
+            error_message,
+            used_cache=False,
+            tokens_used=tokens_used,
+            model_used=model_used,
         )
         await save_cache(command, self.last_generated_command, output)
         self.command_cache[command] = output

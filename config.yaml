@@ -3,7 +3,7 @@ pattern_handlers:
   "permission denied": "Permission error detected. Consider running with elevated privileges (e.g., using sudo)."
 use_llm: true
 fallback_message: "An error occurred. Please check your command and try again."
-default_timeout: 10
+default_timeout: 60
 verbose_mode: false
 aliases:
   ll: ls -la
