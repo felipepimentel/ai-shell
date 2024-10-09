@@ -11,9 +11,8 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from rich.console import Console
 
-from .command import CommandProcessor
+from .command import command_processor
 from .config import config
-from .context import ExecutionContext
 from .ui_handler import UIHandler
 from .utils.logger import ErrorHandler, get_logger, setup_logging
 
@@ -21,15 +20,14 @@ logger = get_logger("ai_shell.cli")
 
 
 class AIShell:
-    def __init__(self, context: ExecutionContext):
-        self.context = context
+    def __init__(self):
         self.console = Console(theme=self._create_theme())
         self.ui_handler = UIHandler(self.console)
         setup_logging(self.console)
         self.logger = get_logger("ai_shell.cli")
         self.error_handler = ErrorHandler(self.console)
 
-        self.processor = CommandProcessor(self.context)
+        self.processor = command_processor
         signal.signal(signal.SIGINT, self.handle_interrupt_signal)
         self.style = self._create_style()
 
@@ -122,10 +120,8 @@ class AIShell:
                         self.processor.history_manager.history
                     )
                 elif prompt_text.lower() == config.simulate_command:
-                    self.context.toggle_simulation_mode()
-                    self.ui_handler.display_simulation_mode(
-                        self.context.simulation_mode
-                    )
+                    config.toggle_simulation_mode()
+                    self.ui_handler.display_simulation_mode(config.simulation_mode)
                 elif prompt_text.lower() == config.clear_cache_command:
                     await self.processor.cache_manager.clear_cache()
                 elif prompt_text.lower() == config.clear_history_command:
@@ -138,8 +134,7 @@ class AIShell:
 
 
 async def main():
-    context = ExecutionContext(simulation_mode=False, verbose_mode=False)
-    shell = AIShell(context)
+    shell = AIShell()
     await shell.run_shell()
 
 
