@@ -1,10 +1,19 @@
+from __future__ import annotations
+
 import asyncio
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from prompt_toolkit import prompt
 
 from ..config import config
 from ..utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from .command_cache_manager import CommandCacheManager
+    from .command_executor import CommandExecutor
+    from .command_generator import CommandGenerator
+    from .command_history_manager import CommandHistoryManager
+    from .context_builder import ContextBuilder
 
 logger = get_logger("ai_shell.command_processor")
 
@@ -12,11 +21,11 @@ logger = get_logger("ai_shell.command_processor")
 class CommandProcessor:
     def __init__(
         self,
-        command_executor,
-        cache_manager,
-        command_generator,
-        history_manager,
-        context_builder,
+        command_executor: CommandExecutor,
+        cache_manager: CommandCacheManager,
+        command_generator: CommandGenerator,
+        history_manager: CommandHistoryManager,
+        context_builder: ContextBuilder,
     ) -> None:
         self.last_generated_command: str = ""
         self._last_command_from_cache: bool = False
