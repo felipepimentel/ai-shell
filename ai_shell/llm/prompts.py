@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from ai_shell.utils.cache import check_cache, save_cache
@@ -14,59 +15,20 @@ logger = get_logger("ai_shell.llm.prompts")
 
 ai = OpenRouterAI()
 
-COMMAND_GENERATION_PROMPT = """
-You are an AI assistant that generates concise, executable shell scripts based on user requests. Your task is to output a minimal, efficient script that fulfills the user's request accurately and safely, ensuring compatibility across different operating systems.
+PROMPTS_DIR = Path(__file__).parent.parent.parent / "assets" / "prompts"
+PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
 
-Guidelines:
 
-1. Script Structure:
-   - Start with #!/bin/sh for POSIX compatibility.
-   - Use functions for complex operations.
+def load_prompt(prompt_name: str) -> str:
+    prompt_file = PROMPTS_DIR / f"{prompt_name}.md"
+    if prompt_file.exists():
+        return prompt_file.read_text()
+    else:
+        logger.warning(f"Prompt file {prompt_file} not found. Using default prompt.")
+        return ""
 
-2. Efficiency and Brevity:
-   - Generate the shortest possible script that accomplishes the task safely.
-   - Use built-in shell features instead of external commands when possible.
 
-3. Error Handling:
-   - Use set -e at the beginning to exit on any error.
-   - For critical errors, use: echo "FATAL:Error message" >&2; exit 1
-   - For user input: echo "USER_INPUT:Prompt [options]" >&2; read -r var_name
-
-4. Output:
-   - Use echo "INFO:Message" for important information.
-   - Use echo "WARNING:Message" >&2 for warnings.
-
-5. Compatibility:
-   - Use POSIX-compliant syntax unless specifically required otherwise.
-   - Check the operating system (using uname or similar) and provide alternative commands for different OSes when necessary.
-   - For Windows compatibility, consider providing PowerShell alternatives in comments.
-
-6. Security and Safety:
-   - Always prompt for user confirmation before performing destructive operations (e.g., deleting files or directories).
-   - Use the USER_INPUT mechanism for all user interactions.
-   - Sanitize and quote variables to prevent injection.
-   - Avoid using eval or other potentially dangerous constructs.
-
-7. Handling the --clear-all flag:
-   - When the --clear-all flag is present, still prompt the user before clearing or overwriting existing content.
-   - The flag should indicate a preference for clearing, but not bypass user confirmation.
-
-8. User Input Handling:
-   - When user input is required, use the following format: echo "USER_INPUT:Prompt message" >&2
-   - Immediately after requesting user input, provide a way to handle the input or cancel the operation.
-   - Avoid situations where the script might get stuck waiting for user input indefinitely.
-
-9. Cross-platform Considerations:
-   - Use portable commands and utilities available on most Unix-like systems.
-   - When using system-specific commands, provide alternatives or checks for different operating systems.
-   - Consider file path differences (e.g., forward slashes for Unix, backslashes for Windows).
-
-Generate a minimal, executable shell script to fulfill this request:
-{user_command}
-
-Context:
-{context}
-"""
+COMMAND_GENERATION_PROMPT = load_prompt("command_generation")
 
 
 async def build_contextual_prompt(
@@ -112,6 +74,7 @@ async def build_full_prompt(
     history: List[CommandHistoryEntry],
     enhanced_context: Dict = None,
     max_entries: int = 10,
+    prompt_name: str = "command_generation",
 ) -> str:
     """
     Builds the complete prompt with rich context, user command, and system information.
@@ -119,7 +82,8 @@ async def build_full_prompt(
     contextual_prompt = await build_contextual_prompt(
         history, max_entries, enhanced_context
     )
-    full_prompt = COMMAND_GENERATION_PROMPT.format(
+    main_prompt = load_prompt(prompt_name)
+    full_prompt = main_prompt.format(
         context=contextual_prompt, user_command=user_command
     )
 
@@ -143,6 +107,7 @@ async def generate_command_from_prompt(
     history: List[CommandHistoryEntry],
     enhanced_context: Dict = None,
     max_entries: int = 5,
+    prompt_name: str = "command_generation",
 ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
     try:
         # Check cache first
@@ -152,7 +117,7 @@ async def generate_command_from_prompt(
             return cached_command, None, "cached"
 
         full_prompt = await build_full_prompt(
-            user_command, history, enhanced_context, max_entries
+            user_command, history, enhanced_context, max_entries, prompt_name
         )
         logger.debug(f"Full prompt generated (first 100 chars): {full_prompt[:100]}...")
         logger.info("Sending prompt to AI for command generation")

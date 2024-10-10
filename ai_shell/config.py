@@ -14,15 +14,17 @@ class Config:
         self.history_command: str = "history"
         self.simulate_command: str = "simulate"
         self.prompt_timeout: int = 30
-        self.default_timeout: int = self._config.get("default_timeout", 30)
+        self.default_timeout: int = self._config.get("default_timeout", 120)
+        self.long_running_timeout: int = self._config.get("long_running_timeout", 600)  # 10 minutos
         self.verbose_mode: bool = self._config.get("verbose_mode", False)
         self.aliases: Dict[str, str] = self._config.get("aliases", {})
-        self.simulation_mode: bool = False
+        self.simulation_mode: bool = self._config.get("simulation_mode", False)
         self.dangerous_commands_list: List[str] = self._config.get(
             "dangerous_commands", ["rm -rf", "dd if=", "mkfs", ":(){ :|:& };:"]
         )
         self.clear_cache_command: str = "clear_cache"
         self.clear_history_command: str = "clear_history"
+        self.expert_mode: bool = self._config.get("expert_mode", False)
 
     @staticmethod
     def _load_config(filename: str) -> Dict:

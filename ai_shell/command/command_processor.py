@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, List, Optional
+import os
+from typing import TYPE_CHECKING, List, Optional, Callable
 
-from prompt_toolkit import prompt
+from prompt_toolkit import PromptSession
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from ..config import config
 from ..utils.logger import get_logger
@@ -35,47 +37,81 @@ class CommandProcessor:
         self.history_manager = history_manager
         self.context_builder = context_builder
 
-    async def process_command(
-        self,
-        command: str,
-        simulation_mode: bool,
-        verbose_mode: bool,
-        interactive_mode: bool,
-    ) -> Optional[str]:
-        if verbose_mode:
-            logger.debug(f"Processing command: {command}")
-
-        command = self.resolve_alias(command) or command
-
-        cached_command, cached_output = await self.cache_manager.check_cache(command)
-        if cached_output:
-            return self.handle_cached_output(command, cached_command, cached_output)
-
+    async def generate_ai_response(self, command: str) -> Optional[str]:
         context = self.context_builder.build_enhanced_context(
             self.history_manager.get_recent_commands(5)
         )
-        (
-            ai_response,
-            tokens_used,
-            model_used,
-        ) = await self.command_generator.generate_command(
+        ai_response, _, _ = await self.command_generator.generate_command(
             command, self.history_manager.history, context
         )
-        if not ai_response:
-            return None
+        return ai_response
 
-        if interactive_mode:
-            ai_response = self.prompt_edit_command(ai_response)
+    async def process_command(
+        self,
+        original_command: str,
+        ai_response: str,
+        simulation_mode: bool,
+        verbose_mode: bool,
+        interactive_mode: bool,
+        use_cache: bool = True,
+        progress_callback: Callable[[int], None] = None,
+    ) -> Optional[str]:
+        if verbose_mode:
+            logger.debug(f"Processing command: {original_command}")
 
-        commands = self.extract_commands(ai_response)
-        if not commands:
-            return None
+        if use_cache:
+            cached_command, cached_output = await self.cache_manager.check_cache(original_command)
+            if cached_output:
+                return self.handle_cached_output(original_command, cached_command, cached_output)
 
-        output = await self.execute_commands(commands, simulation_mode, verbose_mode)
+        simplified_script = self.simplify_script(ai_response)
+        output = await self.execute_script_interactively(simplified_script, simulation_mode, verbose_mode, progress_callback)
         await self.handle_command_output(
-            command, output, ai_response, tokens_used, model_used
+            original_command, output, ai_response, None, None
         )
         return output
+
+    def simplify_script(self, script: str) -> str:
+        lines = script.split('\n')
+        simplified_lines = []
+        for line in lines:
+            if not line.strip().startswith('#') and line.strip():
+                simplified_lines.append(line)
+        return '\n'.join(simplified_lines)
+
+    async def execute_script_interactively(
+        self,
+        script: str,
+        simulation_mode: bool,
+        verbose_mode: bool,
+        progress_callback: Callable[[int], None] = None,
+    ) -> str:
+        lines = script.split('\n')
+        results = []
+        total_lines = len(lines)
+
+        for i, line in enumerate(lines):
+            if line.startswith("echo "):
+                message = line[5:].strip('"')
+                if message.startswith("USER_INPUT:"):
+                    user_input = await self._get_user_input(message[11:])
+                    if user_input.lower() == 'q':
+                        return "Operation cancelled by user."
+                elif message.startswith("INFO:") or message.startswith("WARNING:"):
+                    logger.info(message)
+                    results.append(message)
+                continue
+
+            if simulation_mode:
+                results.append(f"[Simulation] Would execute: {line}")
+            else:
+                result = await self._execute_single_command(line)
+                results.append(result)
+
+            if progress_callback:
+                progress_callback(int((i + 1) / total_lines * 100))
+
+        return "\n".join(results)
 
     def resolve_alias(self, command: str) -> Optional[str]:
         parts = command.split()
@@ -85,12 +121,14 @@ class CommandProcessor:
             return aliased_command
         return None
 
-    def prompt_edit_command(self, command: str) -> str:
-        edited_command = prompt(
-            f"Generated command:\n{command}\nDo you want to edit it? [y/N]: "
-        )
-        if edited_command.lower() == "y":
-            return prompt("Edit the command: ")
+    async def prompt_edit_command(self, command: str) -> str:
+        session = PromptSession()
+        with patch_stdout():
+            response = await session.prompt_async(
+                f"Generated command:\n{command}\nDo you want to edit it? [y/N]: "
+            )
+            if response.lower() == "y":
+                return await session.prompt_async("Edit the command: ")
         return command
 
     def extract_commands(self, ai_response: str) -> List[str]:
@@ -106,33 +144,54 @@ class CommandProcessor:
 
         return [script]
 
-    async def execute_commands(
-        self,
-        commands: List[str],
-        simulation_mode: bool = False,
-        verbose_mode: bool = False,
-    ) -> str:
-        if simulation_mode:
-            return "\n".join(
-                [f"[Simulation] Would execute:\n{cmd}" for cmd in commands]
-            )
-
-        results = await asyncio.gather(
-            *[self._execute_single_command(cmd) for cmd in commands]
-        )
-        return "\n".join(results)
-
     async def _execute_single_command(self, command: str) -> str:
         try:
-            output, returncode = await self.command_executor.execute_command(
-                command, timeout=config.default_timeout
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.PIPE
             )
-            if returncode != 0:
-                logger.warning(f"Command exited with non-zero status: {returncode}")
-            return output
+
+            async def read_stream(stream):
+                output = []
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    line = line.decode().strip()
+                    output.append(line)
+                    if line.startswith("USER_INPUT:"):
+                        user_input = await self._get_user_input(line[11:])
+                        await process.stdin.write(f"{user_input}\n".encode())
+                    logger.info(f"Command output: {line}")  # Adicione esta linha para log em tempo real
+                return "\n".join(output)
+
+            stdout_task = asyncio.create_task(read_stream(process.stdout))
+            stderr_task = asyncio.create_task(read_stream(process.stderr))
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=config.long_running_timeout)
+            except asyncio.TimeoutError:
+                logger.warning(f"Command is taking longer than expected. Timeout set to {config.long_running_timeout} seconds.")
+                await process.wait()
+                return f"Error: Command execution timed out after {config.long_running_timeout} seconds."
+
+            stdout_output = await stdout_task
+            stderr_output = await stderr_task
+
+            if process.returncode != 0:
+                logger.warning(f"Command exited with non-zero status: {process.returncode}")
+            
+            return stdout_output + ("\n" + stderr_output if stderr_output else "")
         except Exception as e:
             logger.error(f"Command execution failed: {str(e)}")
             return str(e)
+
+    async def _get_user_input(self, prompt: str) -> str:
+        session = PromptSession()
+        with patch_stdout():
+            return await session.prompt_async(f"{prompt}: ")
 
     async def handle_command_output(
         self,
