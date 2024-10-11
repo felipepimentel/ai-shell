@@ -5,7 +5,6 @@ from ..utils.logger import get_logger
 
 logger = get_logger("ai_shell.command_generator")
 
-
 class CommandGenerator:
     async def generate_command(
         self, user_command: str, context: Dict[str, Any]

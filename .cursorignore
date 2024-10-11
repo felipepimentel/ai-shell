@@ -1,2 +1,6 @@
 .vscode/*
-.docs
+.docs/*
+.cursorrules
+LICENSE
+poetry.lock
+README.md
