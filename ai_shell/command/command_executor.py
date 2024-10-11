@@ -6,6 +6,7 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor
 from typing import Callable, List, Optional, Tuple
 
+from ..config import config
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,9 +17,11 @@ class CommandExecutor:
         self.executor = ProcessPoolExecutor(max_workers=max_workers or os.cpu_count())
 
     async def execute_command(
-        self, command: str, timeout: int = 300
+        self, command: str, timeout: Optional[int] = None
     ) -> Tuple[str, int]:
         logger.info(f"Starting execution of command: {command}")
+        timeout = timeout or config.default_timeout
+
         try:
             process = await asyncio.create_subprocess_shell(
                 command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -58,36 +61,7 @@ class CommandExecutor:
             logger.error(traceback.format_exc())
             return f"Error: {str(e)}", 1
 
-    async def simulate_command(self, command: str) -> Tuple[str, int]:
-        args = shlex.split(command)
-        simulated_output = f"[Simulation] Would execute: {command}\n"
-
-        if args[0] == "rm":
-            simulated_output += self.simulate_rm(args)
-        elif args[0] == "git":
-            simulated_output += self.simulate_git(args)
-        elif args[0] == "mkdir":
-            simulated_output += self.simulate_mkdir(args)
-        elif args[0] == "cp" or args[0] == "mv":
-            simulated_output += self.simulate_file_operation(args)
-        elif args[0] == "chmod":
-            simulated_output += self.simulate_chmod(args)
-        elif args[0] == "chown":
-            simulated_output += self.simulate_chown(args)
-        elif args[0] == "ls":
-            simulated_output += self.simulate_ls(args)
-        elif args[0] == "cat":
-            simulated_output += self.simulate_cat(args)
-        elif args[0] == "echo":
-            simulated_output += self.simulate_echo(args)
-        elif args[0] == "touch":
-            simulated_output += self.simulate_touch(args)
-        else:
-            simulated_output += f"[Simulation] Would execute unknown command: {args[0]}"
-
-        return simulated_output, 0
-
-    async def execute_command_with_timeout(
+    async def execute_command_with_progress(
         self,
         command: str,
         timeout: int,
@@ -124,16 +98,30 @@ class CommandExecutor:
             process.terminate()
             return "Error: Command execution was cancelled", 1
 
-    async def execute_long_running_command(
-        self,
-        command: str,
-        timeout: int,
-        progress_callback: Callable[[str], None] = None,
-    ) -> Tuple[str, int]:
-        return await self.execute_command(command, timeout, progress_callback)
+    async def simulate_command(self, command: str) -> Tuple[str, int]:
+        args = shlex.split(command)
+        simulated_output = f"[Simulation] Would execute: {command}\n"
 
-    async def cancel_command(self, process):
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        simulation_functions = {
+            "rm": self.simulate_rm,
+            "git": self.simulate_git,
+            "mkdir": self.simulate_mkdir,
+            "cp": self.simulate_file_operation,
+            "mv": self.simulate_file_operation,
+            "chmod": self.simulate_chmod,
+            "chown": self.simulate_chown,
+            "ls": self.simulate_ls,
+            "cat": self.simulate_cat,
+            "echo": self.simulate_echo,
+            "touch": self.simulate_touch,
+        }
+
+        if args[0] in simulation_functions:
+            simulated_output += simulation_functions[args[0]](args)
+        else:
+            simulated_output += f"[Simulation] Would execute unknown command: {args[0]}"
+
+        return simulated_output, 0
 
     @staticmethod
     def simulate_rm(args: List[str]) -> str:
@@ -144,16 +132,13 @@ class CommandExecutor:
 
     @staticmethod
     def simulate_git(args: List[str]) -> str:
-        if args[1] == "reset":
-            return f"[Simulation] Would reset Git repository to: {args[2]}"
-        elif args[1] == "clone":
-            return f"[Simulation] Would clone repository from: {args[2]}"
-        elif args[1] == "push":
-            return "[Simulation] Would push changes to remote repository"
-        elif args[1] == "pull":
-            return "[Simulation] Would pull changes from remote repository"
-        else:
-            return f"[Simulation] Would execute Git command: {' '.join(args[1:])}"
+        git_commands = {
+            "reset": lambda: f"Would reset Git repository to: {args[2]}",
+            "clone": lambda: f"Would clone repository from: {args[2]}",
+            "push": lambda: "Would push changes to remote repository",
+            "pull": lambda: "Would pull changes from remote repository",
+        }
+        return f"[Simulation] {git_commands.get(args[1], lambda: f'Would execute Git command: {' '.join(args[1:])}')()}"
 
     @staticmethod
     def simulate_mkdir(args: List[str]) -> str:
@@ -178,9 +163,7 @@ class CommandExecutor:
 
     @staticmethod
     def simulate_cat(args: List[str]) -> str:
-        if len(args) < 2:
-            return "[Simulation] Error: No file specified for cat command"
-        return f"[Simulation] Would display contents of file: {args[1]}"
+        return f"[Simulation] Would display contents of file: {args[1]}" if len(args) > 1 else "[Simulation] Error: No file specified for cat command"
 
     @staticmethod
     def simulate_echo(args: List[str]) -> str:
@@ -188,10 +171,11 @@ class CommandExecutor:
 
     @staticmethod
     def simulate_touch(args: List[str]) -> str:
-        if len(args) < 2:
-            return "[Simulation] Error: No file specified for touch command"
-        return f"[Simulation] Would create or update timestamp of file: {args[1]}"
+        return f"[Simulation] Would create or update timestamp of file: {args[1]}" if len(args) > 1 else "[Simulation] Error: No file specified for touch command"
+
+    async def cancel_command(self, process):
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
 
     async def shutdown(self):
-        # Implement any cleanup needed
+        self.executor.shutdown(wait=True)
         logger.info("CommandExecutor shutdown completed.")

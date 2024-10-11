@@ -2,34 +2,25 @@ import asyncio
 import os
 import pwd
 import sys
-import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
-from rich.theme import Theme
 
-from ai_shell.command.command_cache_manager import CommandCacheManager
-from ai_shell.command.command_executor import CommandExecutor
-from ai_shell.command.command_generator import CommandGenerator
-from ai_shell.command.command_processor import CommandProcessor
-from ai_shell.command.context_builder import ContextBuilder
-from ai_shell.config import config
-from ai_shell.datatypes import AIShellResult
-from ai_shell.llm.prompts import (
-    generate_command_from_prompt,
-    generate_conflict_resolution_options,
-)
-from ai_shell.ui_handler import UIHandler
-from ai_shell.utils.cache import init_cache
-from ai_shell.utils.command_executor import execute_command
-from ai_shell.utils.conflict_resolver import detect_conflict, resolve_conflict
-from ai_shell.utils.dependency_manager import install_dependency
-from ai_shell.utils.error_analyzer import analyze_error, suggest_fix
-from ai_shell.utils.logger import get_logger, log_info, setup_logging
+from .command.command_cache_manager import CommandCacheManager
+from .command.command_executor import CommandExecutor
+from .command.command_generator import CommandGenerator
+from .command.command_processor import CommandProcessor
+from .config import config
+from .context_manager import ContextBuilder
+from .datatypes import AIShellResult
+from .ui_handler import UIHandler
+from .utils.cache import init_cache
+from .utils.error_manager import ErrorHandler
+from .utils.logger import get_logger, setup_logging
 
 setup_logging()
 logger = get_logger("ai_shell.ai_shell")
@@ -47,13 +38,18 @@ class AIShell:
         self.ui_handler = ui_handler
         self.cache_manager = CommandCacheManager()
         self.context_builder = ContextBuilder()
-        self.processor = CommandProcessor()
+        self.processor = CommandProcessor(
+            command_generator=self.command_generator,
+            command_executor=self.command_executor,
+            cache_manager=self.cache_manager,
+            context_builder=self.context_builder,
+        )
         self.logger = logger
+        self.error_handler = ErrorHandler()
+        self.config = config
 
-        self.processor.command_generator = self.command_generator
-        self.processor.command_executor = self.command_executor
-        self.processor.cache_manager = self.cache_manager
-        self.processor.context_builder = self.context_builder
+        self.style = self._create_style()
+        self.console = self.ui_handler.console
 
     @classmethod
     async def create(cls, non_interactive: bool = False, dry_run: bool = False):
@@ -64,6 +60,7 @@ class AIShell:
 
     async def initialize(self):
         await init_cache()
+        await self._initialize_context()
 
     async def _initialize_context(self) -> Dict[str, Any]:
         try:
@@ -71,235 +68,13 @@ class AIShell:
         except OSError:
             user = pwd.getpwuid(os.getuid())[0]
 
-        return {
+        context = {
             "current_directory": os.getcwd(),
             "user": user,
             "os": sys.platform,
         }
-
-    async def process_command(self, user_input: str) -> AIShellResult:
-        try:
-            logger.info(f"Processing command: {user_input}")
-
-            context = await self._initialize_context()
-            logger.debug(f"Initialized context: {context}")
-
-            logger.info("Generating AI response")
-            (
-                ai_response,
-                tokens_used,
-                model_used,
-            ) = await self.command_generator.generate_command(user_input, context)
-            logger.debug(f"AI response generated: {ai_response}")
-
-            if ai_response is None:
-                logger.error("AI response is None")
-                return AIShellResult(
-                    success=False, message="Failed to generate AI response."
-                )
-
-            logger.info("Displaying AI response to user")
-            self.ui_handler.display_ai_response(ai_response)
-
-            logger.info("Waiting for user confirmation")
-            user_choice = await self.ui_handler.confirm_execution()
-            logger.debug(f"User choice: {user_choice}")
-
-            if user_choice == "":
-                shell_command = ai_response
-            elif user_choice == "e":
-                shell_command = await self.ui_handler.edit_command(ai_response)
-            else:
-                logger.info("Command execution cancelled by user")
-                return AIShellResult(
-                    success=False, message="Command execution cancelled by user."
-                )
-
-            logger.info(f"Executing shell command: {shell_command}")
-            try:
-                output, exit_code = await self.command_executor.execute_command(
-                    shell_command, timeout=600
-                )
-                logger.debug(f"Command output: {output}")
-                logger.debug(f"Command exit code: {exit_code}")
-
-                if exit_code != 0:
-                    logger.error(f"Command failed with exit code {exit_code}")
-                    return AIShellResult(
-                        success=False,
-                        message=f"Command failed with exit code {exit_code}. Error: {output}",
-                    )
-
-                logger.info("Command executed successfully")
-                return AIShellResult(success=True, message=output)
-            except asyncio.TimeoutError:
-                logger.error("Command execution timed out")
-                return AIShellResult(
-                    success=False, message="Command execution timed out"
-                )
-            except Exception as e:
-                logger.error(f"Error executing command: {str(e)}")
-                logger.error(traceback.format_exc())
-                return AIShellResult(
-                    success=False, message=f"Error executing command: {str(e)}"
-                )
-
-        except Exception as e:
-            logger.error(f"Unexpected error in process_command: {str(e)}")
-            logger.error(traceback.format_exc())
-            return AIShellResult(
-                success=False, message=f"An unexpected error occurred: {str(e)}"
-            )
-
-    async def _handle_conflict(
-        self, user_input: str, shell_command: str, conflict: str
-    ) -> str:
-        context = await self._initialize_context()
-        options = await generate_conflict_resolution_options(
-            user_input, conflict, context
-        )
-
-        if not options:
-            return shell_command
-
-        choice = await self.ui_handler.get_conflict_resolution_choice(conflict, options)
-
-        if choice is None:
-            return shell_command
-
-        return await resolve_conflict(conflict, choice, shell_command)
-
-    async def _handle_command_error(
-        self, user_input: str, shell_command: str, error_output: str, exit_code: int
-    ) -> AIShellResult:
-        self.logger.error(f"Command failed with exit code {exit_code}: {error_output}")
-
-        context = await self._initialize_context()
-        options = await generate_conflict_resolution_options(
-            user_input, error_output, context
-        )
-
-        if not options:
-            return AIShellResult(
-                success=False, message=f"Command failed: {error_output}"
-            )
-
-        choice = await self.ui_handler.get_error_resolution_choice(
-            error_output, options
-        )
-
-        if choice is None:
-            return AIShellResult(success=False, message="Operation cancelled by user.")
-
-        if "retry" in choice.lower():
-            return await self.process_command(user_input)
-        elif "modify" in choice.lower():
-            modified_command = await self.ui_handler.edit_command(shell_command)
-            return await self.process_command(modified_command)
-        else:
-            action_result = await self._execute_resolution_action(choice, shell_command)
-            return AIShellResult(
-                success=True, message=f"Action taken: {choice}\nResult: {action_result}"
-            )
-
-    async def _execute_resolution_action(self, choice: str, shell_command: str) -> str:
-        if "remove" in choice.lower():
-            dir_path = shell_command.split()[-1]
-            result, exit_code = await self.command_executor.execute_command(
-                f"rm -rf {dir_path}"
-            )
-            return (
-                f"Removed existing directory: {dir_path}"
-                if exit_code == 0
-                else f"Failed to remove directory: {result}"
-            )
-        elif "rename" in choice.lower():
-            dir_path = shell_command.split()[-1]
-            new_path = f"{dir_path}_old"
-            result, exit_code = await self.command_executor.execute_command(
-                f"mv {dir_path} {new_path}"
-            )
-            return (
-                f"Renamed existing directory to: {new_path}"
-                if exit_code == 0
-                else f"Failed to rename directory: {result}"
-            )
-        elif "sync" in choice.lower():
-            dir_path = shell_command.split()[-1]
-            result, exit_code = await self.command_executor.execute_command(
-                f"git -C {dir_path} pull"
-            )
-            return (
-                f"Synced existing directory: {dir_path}"
-                if exit_code == 0
-                else f"Failed to sync directory: {result}"
-            )
-        else:
-            return "No action taken"
-
-    def _parse_chained_commands(self, user_input: str) -> List[str]:
-        return [cmd.strip() for cmd in user_input.split(";") if cmd.strip()]
-
-    def _handle_missing_dependencies(self, missing_deps: List[str]) -> None:
-        if self.interactive_mode:
-            for dep in missing_deps:
-                if self.ui_handler.confirm_installation(dep):
-                    install_dependency(dep)
-                else:
-                    log_info(f"Skipped installation of {dep}")
-        else:
-            for dep in missing_deps:
-                log_info(f"Auto-installing missing dependency: {dep}")
-                install_dependency(dep)
-            log_info("All missing dependencies have been installed.")
-
-    async def _generate_shell_command(self, user_input: str) -> str:
-        context = await self._initialize_context()
-        generated_command, _, _ = await generate_command_from_prompt(
-            user_input, context
-        )
-        return generated_command if generated_command else ""
-
-    def _execute_command(self, shell_command: str) -> str:
-        conflict = detect_conflict(shell_command)
-        if conflict:
-            resolution = self._get_conflict_resolution(conflict)
-            return resolve_conflict(conflict, resolution)
-
-        return execute_command(shell_command, self.logger)
-
-    def _format_output(self, output: str) -> str:
-        return output
-
-    def _suggest_fix(self, error: Exception) -> str:
-        error_analysis = analyze_error(error)
-        suggested_fix = suggest_fix(error_analysis, self.context)
-        return suggested_fix
-
-    def _create_theme(self):
-        return Theme(
-            {
-                "info": "cyan",
-                "warning": "yellow",
-                "error": "bold red",
-                "critical": "bold white on red",
-                "success": "bold green",
-                "command": "bold magenta",
-                "output": "green",
-            }
-        )
-
-    def _create_style(self):
-        return Style.from_dict(
-            {
-                "prompt": "ansicyan bold",
-                "command": "ansigreen",
-            }
-        )
-
-    def handle_interrupt_signal(self, sig, frame):
-        self.console.print("\n[error]Execution interrupted by user (Ctrl + C).[/error]")
-        sys.exit(0)
+        self.context_builder.update_context(context)
+        return context
 
     async def process_command_v2(
         self, command: str, use_cache: bool = True
@@ -313,39 +88,13 @@ class AIShell:
                     )
 
                 simplified_script = self.processor.simplify_script(ai_response)
-                self.console.print(
-                    "[bold cyan]AI generated the following plan:[/bold cyan]"
-                )
-                self.ui_handler.display_ai_response(simplified_script)
+                self.ui_handler.display_ai_plan(simplified_script)
 
                 user_choice = await self.ui_handler.confirm_execution()
                 if user_choice == "":
-                    output = await self.processor.process_command(
-                        command,
-                        ai_response,
-                        simulation_mode=self.config.simulation_mode,
-                        verbose_mode=self.config.verbose_mode,
-                        interactive_mode=True,
-                        use_cache=use_cache,
-                    )
-                    if output is not None:
-                        self.ui_handler.display_command_output(command, output)
-                        return AIShellResult(success=True, message=output)
-                    else:
-                        return AIShellResult(
-                            success=False, message="Failed to process command."
-                        )
+                    return await self._execute_command(command, ai_response, use_cache)
                 elif user_choice == "e":
-                    edited_script = await self.ui_handler.edit_multiline(
-                        simplified_script
-                    )
-                    output = await self.processor.execute_script_interactively(
-                        edited_script,
-                        simulation_mode=self.config.simulation_mode,
-                        verbose_mode=self.config.verbose_mode,
-                    )
-                    self.ui_handler.display_command_output(command, output)
-                    return AIShellResult(success=True, message=output)
+                    return await self._execute_edited_script(command, simplified_script)
                 else:
                     return AIShellResult(
                         success=False, message="Command execution cancelled by user."
@@ -354,12 +103,34 @@ class AIShell:
             self.logger.error(f"Error in process_command: {str(e)}")
             return AIShellResult(success=False, message=f"An error occurred: {str(e)}")
 
-    async def prompt_edit_command(self, ai_response: str) -> str:
-        self.console.print(
-            "[bold yellow]Expert mode: You can edit the generated script.[/bold yellow]"
+    async def _execute_command(
+        self, command: str, ai_response: str, use_cache: bool
+    ) -> AIShellResult:
+        output = await self.processor.process_command(
+            command,
+            ai_response,
+            simulation_mode=self.config.simulation_mode,
+            verbose_mode=self.config.verbose_mode,
+            interactive_mode=True,
+            use_cache=use_cache,
         )
-        edited = await self.ui_handler.edit_multiline(ai_response)
-        return edited
+        if output is not None:
+            self.ui_handler.display_command_output(command, output)
+            return AIShellResult(success=True, message=output)
+        else:
+            return AIShellResult(success=False, message="Failed to process command.")
+
+    async def _execute_edited_script(
+        self, command: str, simplified_script: str
+    ) -> AIShellResult:
+        edited_script = await self.ui_handler.edit_multiline(simplified_script)
+        output = await self.processor.execute_script_interactively(
+            edited_script,
+            simulation_mode=self.config.simulation_mode,
+            verbose_mode=self.config.verbose_mode,
+        )
+        self.ui_handler.display_command_output(command, output)
+        return AIShellResult(success=True, message=output)
 
     async def handle_initial_command(self, args):
         if len(args) > 1:
@@ -388,94 +159,65 @@ class AIShell:
     async def run_shell(self):
         session = PromptSession(history=FileHistory(config.history_file))
 
-        if len(sys.argv) > 1:
-            await self.handle_initial_command(sys.argv)
+        if await self.handle_initial_command(sys.argv):
             return
-
-        def get_dynamic_completer():
-            return WordCompleter(
-                list(config.aliases.keys())
-                + list(self.processor.history_manager.get_recent_commands(10))
-                + [
-                    config.exit_command,
-                    config.help_command,
-                    config.history_command,
-                    config.simulate_command,
-                    config.clear_cache_command,
-                    config.clear_history_command,
-                ]
-            )
 
         self.ui_handler.display_welcome_message()
 
         while True:
             async with self.error_handler.catch_errors():
                 prompt_text = await self.handle_user_input(
-                    session, get_dynamic_completer()
+                    session, self._get_dynamic_completer()
                 )
 
                 if prompt_text.lower() == config.exit_command:
                     break
-                elif prompt_text.lower() == config.help_command:
-                    self.ui_handler.display_help()
-                elif prompt_text.lower() == config.history_command:
-                    self.ui_handler.display_history(
-                        self.processor.history_manager.history
-                    )
-                elif prompt_text.lower() == config.simulate_command:
-                    config.toggle_simulation_mode()
-                    self.ui_handler.display_simulation_mode(config.simulation_mode)
-                elif prompt_text.lower() == config.clear_cache_command:
-                    await self.processor.cache_manager.clear_cache()
-                elif prompt_text.lower() == config.clear_history_command:
-                    self.processor.history_manager.clear_history()
-                else:
-                    await self.process_command_v2(prompt_text)
+
+                await self._process_shell_command(prompt_text)
 
         await self.processor.cache_manager.clean_expired_cache()
         self.ui_handler.display_farewell_message()
 
-    async def simulate_command(self, command: str) -> str:
-        shell_command = await self._generate_shell_command(command)
-        return self._simulate_command_execution(shell_command)
+    def _get_dynamic_completer(self):
+        return WordCompleter(
+            list(config.aliases.keys())
+            + list(self.processor.history_manager.get_recent_commands(10))
+            + [
+                config.exit_command,
+                config.help_command,
+                config.history_command,
+                config.simulate_command,
+                config.clear_cache_command,
+                config.clear_history_command,
+            ]
+        )
 
-    def _simulate_command_execution(self, shell_command: str) -> str:
-        return f"Simulated execution of: {shell_command}"
-
-    def _get_conflict_resolution(self, conflict: str) -> str:
-        if self.interactive_mode:
-            return self.ui_handler.prompt_conflict_resolution(conflict)
+    async def _process_shell_command(self, command: str):
+        command_lower = command.lower()
+        if command_lower == config.help_command:
+            self.ui_handler.display_help()
+        elif command_lower == config.history_command:
+            self.ui_handler.display_history(self.processor.history_manager.history)
+        elif command_lower == config.simulate_command:
+            config.toggle_simulation_mode()
+            self.ui_handler.display_simulation_mode(config.simulation_mode)
+        elif command_lower == config.clear_cache_command:
+            await self.processor.cache_manager.clear_cache()
+        elif command_lower == config.clear_history_command:
+            self.processor.history_manager.clear_history()
         else:
-            return self.config.get("default_conflict_resolution", "skip")
+            await self.process_command_v2(command)
 
-    async def clone_repository(self, repo_url: str, destination: str) -> Dict[str, Any]:
-        """
-        Clone a Git repository to the specified destination using shell commands.
-        """
-        try:
-            command = f"git clone {repo_url} {destination}"
-            output, return_code = await self.command_executor.execute_command(command)
-
-            if return_code == 0:
-                self.logger.info(f"Successfully cloned {repo_url} to {destination}")
-                return {
-                    "success": True,
-                    "message": f"Repository cloned successfully to {destination}",
-                }
-            else:
-                self.logger.error(f"Failed to clone repository: {output}")
-                return {
-                    "success": False,
-                    "message": f"Failed to clone repository: {output}",
-                }
-        except Exception as e:
-            return self.error_handler.handle_error(
-                f"An error occurred while cloning the repository: {str(e)}"
-            )
+    def _create_style(self):
+        return Style.from_dict(
+            {
+                "prompt": "ansicyan bold",
+                "command": "ansigreen",
+            }
+        )
 
     async def cleanup(self):
         """Cleanup resources."""
         logger.info("Starting AIShell cleanup")
         await self.command_executor.shutdown()
-        # Close any open files, database connections, etc.
         logger.info("AIShell cleanup completed.")
