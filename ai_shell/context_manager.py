@@ -1,10 +1,14 @@
 from typing import Any, Dict, List
-from ..config import config
-from ..datatypes import CommandHistoryEntry
+
+from .config import config
+from .datatypes import CommandHistoryEntry
+
 
 class ContextManager:
     @staticmethod
-    def build_enhanced_context(recent_commands: List[CommandHistoryEntry]) -> Dict[str, Any]:
+    def build_enhanced_context(
+        recent_commands: List[CommandHistoryEntry],
+    ) -> Dict[str, Any]:
         return {
             "recent_commands": [
                 {

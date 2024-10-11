@@ -10,7 +10,6 @@ async def get_system_info():
     except OSError:
         user = pwd.getpwuid(os.getuid())[0]
 
-    # Simulando uma operação assíncrona
     await asyncio.sleep(0)
 
     return {

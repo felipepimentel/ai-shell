@@ -25,3 +25,7 @@ class CommandCacheManager:
 
     async def clean_expired_cache(self) -> None:
         await clean_expired_cache()
+
+    async def clear_cache(self) -> None:
+        self.command_cache.clear()
+        await clean_expired_cache()

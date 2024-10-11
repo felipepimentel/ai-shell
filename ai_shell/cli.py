@@ -1,8 +1,11 @@
+import argparse
 import asyncio
 import signal
 import sys
 
-from .ai_shell import AIShell
+from ai_shell.ai_shell import AIShell
+from ai_shell.config import config
+
 from .utils.logger import get_logger, setup_logging
 
 logger = get_logger("ai_shell.cli")
@@ -36,21 +39,40 @@ def handle_exception(loop, context):
 async def main():
     global ai_shell
     setup_logging()
+
+    parser = argparse.ArgumentParser(description="AI Shell")
+    parser.add_argument("--config", type=str, help="Path to config file")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose mode")
+    parser.add_argument("--expert", action="store_true", help="Enable expert mode")
+    parser.add_argument("command", nargs="*", help="Command to execute")
+    args = parser.parse_args()
+
+    if args.config:
+        config._config = config._load_config(args.config)
+    if args.verbose:
+        config.verbose_mode = True
+    if args.expert:
+        config.expert_mode = True
+
     ai_shell = await AIShell.create()
     await ai_shell.initialize()
 
-    if len(sys.argv) > 1:
-        command = " ".join(sys.argv[1:])
-        result = await ai_shell.process_command(command)
-        if result.success:
-            print("Command executed successfully:")
-            print(result.message)
-        else:
-            print(f"Error executing command: {result.message}", file=sys.stderr)
-
-        return
+    if args.command:
+        command = " ".join(args.command)
+        try:
+            result = await ai_shell.process_command(command)
+            if result.success:
+                print("Command executed successfully:")
+                print(result.message)
+            else:
+                print(f"Error executing command: {result.message}", file=sys.stderr)
+        except asyncio.CancelledError:
+            logger.info("Command execution cancelled")
     else:
-        await ai_shell.run_shell()
+        try:
+            await ai_shell.run_shell()
+        except asyncio.CancelledError:
+            logger.info("AI Shell execution cancelled")
 
 
 if __name__ == "__main__":
@@ -63,6 +85,10 @@ if __name__ == "__main__":
 
     try:
         loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received")
     finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.run_until_complete(shutdown(signal.SIGINT, loop))
         loop.close()
         logger.info("Successfully shutdown the AI Shell.")

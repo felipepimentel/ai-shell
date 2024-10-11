@@ -15,6 +15,9 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 class OpenRouterAI:
+    def __init__(self):
+        self.model = OPENROUTER_MODEL
+
     async def generate(self, prompt: str) -> str:
         logger.info(f"Generating response for prompt: {prompt[:50]}...")
 
@@ -24,7 +27,7 @@ class OpenRouterAI:
         }
 
         data = {
-            "model": OPENROUTER_MODEL,
+            "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
         }
 
@@ -45,3 +48,6 @@ class OpenRouterAI:
         except Exception as e:
             logger.error(f"Error generating response: {str(e)}")
             raise
+
+    def get_model_name(self) -> str:
+        return self.model

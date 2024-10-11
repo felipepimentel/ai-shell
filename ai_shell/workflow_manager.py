@@ -1,7 +1,7 @@
 from typing import Any, Dict, List
 
 from ai_shell.command.command_executor import CommandExecutor
-from ai_shell.handlers.dependency_handler import (
+from ai_shell.dependency_handler import (
     check_and_install_dependency,
     install_dependency,
 )

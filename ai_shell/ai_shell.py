@@ -1,13 +1,7 @@
-import asyncio
-import os
-import pwd
-import sys
-from typing import Any, Dict
+from typing import Callable, Dict
 
-from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 
 from .command.command_cache_manager import CommandCacheManager
@@ -15,11 +9,11 @@ from .command.command_executor import CommandExecutor
 from .command.command_generator import CommandGenerator
 from .command.command_processor import CommandProcessor
 from .config import config
-from .context_manager import ContextBuilder
+from .context_manager import ContextManager
 from .datatypes import AIShellResult
+from .error_manager import ErrorHandler
 from .ui_handler import UIHandler
 from .utils.cache import init_cache
-from .utils.error_manager import ErrorHandler
 from .utils.logger import get_logger, setup_logging
 
 setup_logging()
@@ -37,7 +31,7 @@ class AIShell:
         self.command_executor = command_executor
         self.ui_handler = ui_handler
         self.cache_manager = CommandCacheManager()
-        self.context_builder = ContextBuilder()
+        self.context_builder = ContextManager()
         self.processor = CommandProcessor(
             command_generator=self.command_generator,
             command_executor=self.command_executor,
@@ -47,168 +41,49 @@ class AIShell:
         self.logger = logger
         self.error_handler = ErrorHandler()
         self.config = config
-
         self.style = self._create_style()
         self.console = self.ui_handler.console
+        self.internal_commands = self._create_internal_commands()
 
     @classmethod
     async def create(cls, non_interactive: bool = False, dry_run: bool = False):
         command_generator = CommandGenerator()
-        command_executor = CommandExecutor()
+        command_executor = CommandExecutor(dry_run=dry_run)
         ui_handler = UIHandler()
         return cls(command_generator, command_executor, ui_handler)
 
     async def initialize(self):
         await init_cache()
-        await self._initialize_context()
-
-    async def _initialize_context(self) -> Dict[str, Any]:
-        try:
-            user = os.getlogin()
-        except OSError:
-            user = pwd.getpwuid(os.getuid())[0]
-
-        context = {
-            "current_directory": os.getcwd(),
-            "user": user,
-            "os": sys.platform,
-        }
-        self.context_builder.update_context(context)
-        return context
-
-    async def process_command_v2(
-        self, command: str, use_cache: bool = True
-    ) -> AIShellResult:
-        try:
-            async with self.error_handler.catch_errors():
-                ai_response = await self.processor.generate_ai_response(command)
-                if ai_response is None:
-                    return AIShellResult(
-                        success=False, message="Failed to generate AI response."
-                    )
-
-                simplified_script = self.processor.simplify_script(ai_response)
-                self.ui_handler.display_ai_plan(simplified_script)
-
-                user_choice = await self.ui_handler.confirm_execution()
-                if user_choice == "":
-                    return await self._execute_command(command, ai_response, use_cache)
-                elif user_choice == "e":
-                    return await self._execute_edited_script(command, simplified_script)
-                else:
-                    return AIShellResult(
-                        success=False, message="Command execution cancelled by user."
-                    )
-        except Exception as e:
-            self.logger.error(f"Error in process_command: {str(e)}")
-            return AIShellResult(success=False, message=f"An error occurred: {str(e)}")
-
-    async def _execute_command(
-        self, command: str, ai_response: str, use_cache: bool
-    ) -> AIShellResult:
-        output = await self.processor.process_command(
-            command,
-            ai_response,
-            simulation_mode=self.config.simulation_mode,
-            verbose_mode=self.config.verbose_mode,
-            interactive_mode=True,
-            use_cache=use_cache,
-        )
-        if output is not None:
-            self.ui_handler.display_command_output(command, output)
-            return AIShellResult(success=True, message=output)
-        else:
-            return AIShellResult(success=False, message="Failed to process command.")
-
-    async def _execute_edited_script(
-        self, command: str, simplified_script: str
-    ) -> AIShellResult:
-        edited_script = await self.ui_handler.edit_multiline(simplified_script)
-        output = await self.processor.execute_script_interactively(
-            edited_script,
-            simulation_mode=self.config.simulation_mode,
-            verbose_mode=self.config.verbose_mode,
-        )
-        self.ui_handler.display_command_output(command, output)
-        return AIShellResult(success=True, message=output)
-
-    async def handle_initial_command(self, args):
-        if len(args) > 1:
-            initial_command = " ".join(args[1:])
-            output = await self.process_command_v2(initial_command, use_cache=False)
-            self.ui_handler.display_command_output(initial_command, output)
-            return True
-        return False
-
-    async def handle_user_input(self, session, completer):
-        try:
-            return await asyncio.wait_for(
-                session.prompt_async(
-                    HTML('<prompt>AI Shell</prompt> <style fg="ansiyellow">></style> '),
-                    completer=completer,
-                    style=self.style,
-                ),
-                timeout=30,
-            )
-        except asyncio.TimeoutError:
-            self.console.print("[yellow]Timeout: No input received.[/yellow]")
-            return config.exit_command
-        except (EOFError, KeyboardInterrupt):
-            return config.exit_command
-
-    async def run_shell(self):
-        session = PromptSession(history=FileHistory(config.history_file))
-
-        if await self.handle_initial_command(sys.argv):
-            return
-
         self.ui_handler.display_welcome_message()
 
-        while True:
-            async with self.error_handler.catch_errors():
-                prompt_text = await self.handle_user_input(
-                    session, self._get_dynamic_completer()
-                )
-
-                if prompt_text.lower() == config.exit_command:
+    async def run_shell(self):
+        try:
+            while True:
+                command = await self._get_user_input()
+                if command.lower() == self.config.exit_command:
                     break
+                await self._process_shell_command(command)
+        except Exception as e:
+            self.logger.error(f"An error occurred: {str(e)}")
+        finally:
+            await self.cleanup()
 
-                await self._process_shell_command(prompt_text)
-
-        await self.processor.cache_manager.clean_expired_cache()
-        self.ui_handler.display_farewell_message()
-
-    def _get_dynamic_completer(self):
-        return WordCompleter(
-            list(config.aliases.keys())
-            + list(self.processor.history_manager.get_recent_commands(10))
-            + [
-                config.exit_command,
-                config.help_command,
-                config.history_command,
-                config.simulate_command,
-                config.clear_cache_command,
-                config.clear_history_command,
-            ]
+    async def _get_user_input(self) -> str:
+        return await self.ui_handler.session.prompt_async(
+            HTML(f"<ansigreen>{self.config.prompt}</ansigreen>"),
+            style=self.style,
+            completer=self._get_dynamic_completer(),
         )
 
     async def _process_shell_command(self, command: str):
         command_lower = command.lower()
-        if command_lower == config.help_command:
-            self.ui_handler.display_help()
-        elif command_lower == config.history_command:
-            self.ui_handler.display_history(self.processor.history_manager.history)
-        elif command_lower == config.simulate_command:
-            config.toggle_simulation_mode()
-            self.ui_handler.display_simulation_mode(config.simulation_mode)
-        elif command_lower == config.clear_cache_command:
-            await self.processor.cache_manager.clear_cache()
-        elif command_lower == config.clear_history_command:
-            self.processor.history_manager.clear_history()
+        if command_lower in self.internal_commands:
+            await self.internal_commands[command_lower]()
         else:
-            await self.process_command_v2(command)
+            await self.process_command(command)
 
-    def _create_style(self):
+    @staticmethod
+    def _create_style() -> Style:
         return Style.from_dict(
             {
                 "prompt": "ansicyan bold",
@@ -216,8 +91,29 @@ class AIShell:
             }
         )
 
+    def _create_internal_commands(self) -> Dict[str, Callable]:
+        return {
+            self.config.help_command: self.ui_handler.display_help,
+            self.config.history_command: lambda: self.ui_handler.display_history(
+                self.processor.history_manager.history
+            ),
+            self.config.clear_cache_command: self.processor.cache_manager.clear_cache,
+            self.config.clear_history_command: self.processor.history_manager.clear_history,
+        }
+
     async def cleanup(self):
-        """Cleanup resources."""
-        logger.info("Starting AIShell cleanup")
+        self.logger.info("Starting AIShell cleanup")
         await self.command_executor.shutdown()
-        logger.info("AIShell cleanup completed.")
+        await self.processor.cache_manager.clean_expired_cache()
+        self.ui_handler.display_farewell_message()
+        self.logger.info("AIShell cleanup completed.")
+
+    async def process_command(self, command: str) -> AIShellResult:
+        output, return_code = await self.processor.process_command(
+            command, interactive_mode=True
+        )
+        return AIShellResult(success=return_code == 0, message=output)
+
+    def _get_dynamic_completer(self):
+        commands = list(self.internal_commands.keys()) + [self.config.exit_command]
+        return WordCompleter(commands)

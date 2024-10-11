@@ -1,6 +1,6 @@
 import pytest
 
-from ai_shell.utils.conflict_resolver import (
+from ai_shell.conflict_resolver import (
     ConflictResolution,
     detect_conflict,
     resolve_conflict,

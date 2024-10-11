@@ -9,8 +9,9 @@ from ..datatypes import CommandHistoryEntry
 
 
 class CommandHistoryManager:
-    def __init__(self) -> None:
+    def __init__(self, max_history_size: int = 100) -> None:
         self.history: List[CommandHistoryEntry] = []
+        self.max_history_size = max_history_size
 
     def append_to_history(
         self,
@@ -23,19 +24,20 @@ class CommandHistoryManager:
         tokens_used: Optional[int],
         model_used: Optional[str],
     ) -> None:
-        self.history.append(
-            CommandHistoryEntry(
-                command=command,
-                output=output,
-                ai_response=ai_response,
-                status=status,
-                error_message=error_message,
-                used_cache=used_cache,
-                tokens_used=tokens_used,
-                model_used=model_used,
-                timestamp=datetime.now(),  # Usamos datetime.now() em vez de uma string formatada
-            )
+        entry = CommandHistoryEntry(
+            command=command,
+            output=output,
+            ai_response=ai_response,
+            status=status,
+            error_message=error_message,
+            used_cache=used_cache,
+            tokens_used=tokens_used,
+            model_used=model_used,
+            timestamp=datetime.now(),
         )
+        self.history.append(entry)
+        if len(self.history) > self.max_history_size:
+            self.history.pop(0)
         asyncio.create_task(self.save_history())
 
     async def save_history(self) -> None:
@@ -51,3 +53,4 @@ class CommandHistoryManager:
 
     def clear_history(self) -> None:
         self.history.clear()
+        asyncio.create_task(self.save_history())

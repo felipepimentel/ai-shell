@@ -28,11 +28,16 @@ class UIHandler:
         )
 
     async def get_choice(self, prompt: str, options: List[str]) -> Optional[str]:
+        self._display_options(options)
+        return await self._get_valid_choice(prompt, options)
+
+    def _display_options(self, options: List[str]) -> None:
         table = Table(show_header=False, box=None)
         for i, option in enumerate(options, 1):
             table.add_row(f"{i}.", option)
         self.console.print(table)
 
+    async def _get_valid_choice(self, prompt: str, options: List[str]) -> Optional[str]:
         while True:
             choice = await self.session.prompt_async(HTML(prompt))
             if choice.lower() == "q":
@@ -48,13 +53,7 @@ class UIHandler:
     async def get_conflict_resolution_choice(
         self, conflict: str, options: List[str]
     ) -> Optional[str]:
-        self.console.print(
-            Panel(
-                conflict,
-                title="[bold yellow]Conflict detected[/bold yellow]",
-                border_style="yellow",
-            )
-        )
+        self._display_panel(conflict, "Conflict detected", "yellow")
         self.console.print(
             "[bold yellow]Please choose a resolution option:[/bold yellow]"
         )
@@ -66,17 +65,20 @@ class UIHandler:
     async def get_error_resolution_choice(
         self, error_output: str, options: List[str]
     ) -> Optional[str]:
-        self.console.print(
-            Panel(
-                error_output,
-                title="[bold red]Command execution failed[/bold red]",
-                border_style="red",
-            )
-        )
+        self._display_panel(error_output, "Command execution failed", "red")
         self.console.print("[bold yellow]Please choose an action:[/bold yellow]")
         return await self.get_choice(
             '<ansiyellow>Enter the number of your choice (or "q" to quit): </ansiyellow>',
             options,
+        )
+
+    def _display_panel(self, content: str, title: str, color: str) -> None:
+        self.console.print(
+            Panel(
+                content,
+                title=f"[bold {color}]{title}[/bold {color}]",
+                border_style=color,
+            )
         )
 
     async def edit_command(self, command: str) -> str:
@@ -98,62 +100,62 @@ class UIHandler:
         )
 
     def display_command_output(self, command: str, output: str) -> None:
-        self.console.print(
-            Panel(
-                f"{command}\n\n{output}",
-                title="[bold green]Command Output[/bold green]",
-                border_style="green",
-            )
-        )
+        self._display_panel(f"{command}\n\n{output}", "Command Output", "green")
 
     def display_welcome_message(self) -> None:
-        welcome_panel = Panel(
+        welcome_text = (
             "Type your commands or questions, and I'll do my best to help.\n"
-            "Type 'exit' to quit, 'help' for more information.",
-            title="[bold blue]Welcome to AI Shell![/bold blue]",
-            border_style="blue",
+            "Type 'exit' to quit, 'help' for more information."
         )
-        self.console.print(welcome_panel)
+        self._display_panel(welcome_text, "Welcome to AI Shell!", "blue")
 
     def display_help(self) -> None:
         help_items = [
             "Type natural language commands or questions",
             "Use 'exit' to quit the shell",
             "Use 'history' to view command history",
-            "Use 'simulate' to toggle simulation mode",
             "Use 'clear cache' to clear the command cache",
             "Use 'clear history' to clear the command history",
         ]
-        help_table = Table(
-            title="[bold blue]AI Shell Help[/bold blue]", box=None, show_header=False
-        )
-        for item in help_items:
-            help_table.add_row(f"• {item}")
-        self.console.print(help_table)
+        self._display_table("AI Shell Help", help_items, bullet_point=True)
 
     def display_history(self, history: List[str]) -> None:
-        history_table = Table(title="[bold blue]Command History[/bold blue]", box=None)
-        history_table.add_column("No.", style="cyan", no_wrap=True)
-        history_table.add_column("Command", style="magenta")
-        for i, command in enumerate(history, 1):
-            history_table.add_row(str(i), command)
-        self.console.print(history_table)
-
-    def display_simulation_mode(self, simulation_mode: bool) -> None:
-        status = "ON" if simulation_mode else "OFF"
-        self.console.print(
-            Panel(
-                f"Simulation mode is now {status}",
-                title="[bold blue]Simulation Mode[/bold blue]",
-                border_style="blue",
-            )
+        self._display_table(
+            "Command History",
+            history,
+            numbered=True,
+            columns=["No.", "Command"],
+            styles=["cyan", "magenta"],
         )
 
+    def _display_table(
+        self,
+        title: str,
+        items: List[str],
+        bullet_point: bool = False,
+        numbered: bool = False,
+        columns: Optional[List[str]] = None,
+        styles: Optional[List[str]] = None,
+    ) -> None:
+        table = Table(
+            title=f"[bold blue]{title}[/bold blue]", box=None, show_header=bool(columns)
+        )
+
+        if columns:
+            for col, style in zip(columns, styles or []):
+                table.add_column(col, style=style, no_wrap=True)
+
+        for i, item in enumerate(items, 1):
+            if bullet_point:
+                table.add_row(f"• {item}")
+            elif numbered:
+                table.add_row(str(i), item)
+            else:
+                table.add_row(item)
+
+        self.console.print(table)
+
     def display_farewell_message(self) -> None:
-        self.console.print(
-            Panel(
-                "Thank you for using AI Shell. Goodbye!",
-                title="[bold blue]Farewell[/bold blue]",
-                border_style="blue",
-            )
+        self._display_panel(
+            "Thank you for using AI Shell. Goodbye!", "Farewell", "blue"
         )

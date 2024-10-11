@@ -8,7 +8,6 @@ from .command_executor import CommandExecutor
 from .command_generator import CommandGenerator
 from .command_history_manager import CommandHistoryManager
 from .command_processor import CommandProcessor
-from .context_builder import ContextBuilder
 
 if TYPE_CHECKING:
     pass
@@ -22,6 +21,5 @@ __all__ = [
     "CommandExecutor",
     "CommandGenerator",
     "CommandHistoryManager",
-    "ContextBuilder",
     "CommandCacheManager",
 ]

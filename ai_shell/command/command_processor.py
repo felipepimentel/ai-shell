@@ -1,95 +1,118 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional, Tuple, TypedDict
 
+from ..config import config
+from ..context_manager import ContextManager
 from ..utils.logger import get_logger
-from .command_history_manager import CommandHistoryManager  # Add this import
-
-if TYPE_CHECKING:
-    pass
+from .command_cache_manager import CommandCacheManager
+from .command_executor import CommandExecutor
+from .command_generator import CommandGenerator, CommandGenerationError
+from .command_history_manager import CommandHistoryManager
 
 logger = get_logger(__name__)
 
+RECENT_COMMANDS_COUNT = 5
+ERROR_EXIT_CODE = 1
+
+class CommandContext(TypedDict):
+    recent_commands: list[str]
+    # Add other context fields as needed
+
+class CommandProcessingError(Exception):
+    pass
 
 class CommandProcessor:
-    def __init__(self):
+    def __init__(
+        self,
+        command_generator: CommandGenerator,
+        command_executor: CommandExecutor,
+        cache_manager: CommandCacheManager,
+        context_builder: ContextManager,
+    ):
         self.history_manager = CommandHistoryManager()
-        self.command_generator = None
-        self.command_executor = None
-        self.cache_manager = None
-        self.context_builder = None
-
-    async def generate_ai_response(self, command: str) -> Optional[str]:
-        context = self.context_builder.build_enhanced_context(
-            self.history_manager.get_recent_commands(5)
-        )
-        ai_response, _, _ = await self.command_generator.generate_command(
-            command, context
-        )
-        return ai_response
+        self.command_generator = command_generator
+        self.command_executor = command_executor
+        self.cache_manager = cache_manager
+        self.context_builder = context_builder
 
     async def process_command(
         self,
         command: str,
-        ai_response: str,
-        simulation_mode: bool,
-        verbose_mode: bool,
         interactive_mode: bool,
         use_cache: bool = True,
-    ) -> Optional[str]:
-        if use_cache:
-            cached_command, cached_output = await self.cache_manager.check_cache(
-                command
-            )
-            if cached_command and cached_output:
-                return self._handle_cached_output(
-                    command, cached_command, cached_output
-                )
+    ) -> Tuple[Optional[str], int]:
+        try:
+            if use_cache:
+                cached_result = await self._check_cache(command)
+                if cached_result:
+                    return cached_result
 
-        output = await self.command_executor.execute_command(
-            ai_response, simulation_mode, verbose_mode
+            ai_response, tokens_used, model_used = await self._generate_ai_response(command)
+            if ai_response is None:
+                raise CommandProcessingError("Failed to generate AI response")
+
+            output, return_code = await self._execute_command(ai_response, interactive_mode)
+            
+            if output is not None:
+                await self._cache_command(command, ai_response, output, return_code, tokens_used, model_used)
+
+            return output, return_code
+        except CommandProcessingError as e:
+            logger.error(f"Error processing command: {str(e)}")
+            return str(e), ERROR_EXIT_CODE
+
+    async def _generate_ai_response(self, command: str) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+        context = self._build_context()
+        try:
+            return await self.command_generator.generate_command(command, context)
+        except CommandGenerationError as e:
+            raise CommandProcessingError(f"Failed to generate command: {str(e)}")
+
+    def _build_context(self) -> CommandContext:
+        recent_commands = self.history_manager.get_recent_commands(RECENT_COMMANDS_COUNT)
+        return CommandContext(recent_commands=recent_commands)
+
+    async def _check_cache(self, command: str) -> Optional[Tuple[str, int]]:
+        cached_command, cached_output = await self.cache_manager.check_cache(command)
+        if cached_command and cached_output:
+            self._log_cache_hit(command, cached_command, cached_output)
+            return cached_output, 0
+        return None
+
+    async def _execute_command(self, ai_response: str, interactive_mode: bool) -> Tuple[str, int]:
+        timeout = self._get_timeout()
+        return await self.command_executor.execute_command(ai_response, timeout=timeout)
+
+    def _get_timeout(self) -> int:
+        return config.long_running_timeout if config.expert_mode else config.default_timeout
+
+    async def _cache_command(self, command: str, ai_response: str, output: str, return_code: int, tokens_used: Optional[int], model_used: Optional[str]):
+        await self.cache_manager.cache_command(command, ai_response, output)
+        self._append_to_history(command, output, ai_response, return_code, tokens_used, model_used, used_cache=False)
+
+    def _log_cache_hit(self, command: str, cached_command: str, cached_output: str):
+        logger.info(f"Using cached output for command: {command}")
+        self._append_to_history(command, cached_output, cached_command, 0, None, None, used_cache=True)
+
+    def _append_to_history(self, command: str, output: str, ai_response: str, return_code: int, tokens_used: Optional[int], model_used: Optional[str], used_cache: bool):
+        status = "Success" if return_code == 0 else "Failed"
+        error_message = output if return_code != 0 else None
+        self.history_manager.append_to_history(
+            command=command,
+            output=output,
+            ai_response=ai_response,
+            status=status,
+            error_message=error_message,
+            used_cache=used_cache,
+            tokens_used=tokens_used,
+            model_used=model_used,
         )
 
-        if output is not None:
-            output_str = str(output)
-            await self.cache_manager.cache_command(command, ai_response, output_str)
-            self.history_manager.append_to_history(
-                command=command,
-                output=output_str,
-                ai_response=ai_response,
-                status="Success",
-                error_message=None,
-                used_cache=False,
-                tokens_used=None,
-                model_used=None,
-            )
-
-        return output
+    async def execute_script_interactively(self, script: str, verbose_mode: bool) -> Tuple[str, int]:
+        timeout = self._get_timeout()
+        return await self.command_executor.execute_command(script, timeout=timeout)
 
     def simplify_script(self, script: str) -> str:
         # Implement logic to simplify the script
         return script
-
-    async def execute_script_interactively(
-        self, script: str, simulation_mode: bool, verbose_mode: bool
-    ) -> str:
-        # Implement logic for interactive script execution
-        return await self.command_executor.execute_command(
-            script, simulation_mode, verbose_mode
-        )
-
-    def _handle_cached_output(
-        self, command: str, cached_command: str, cached_output: str
-    ) -> str:
-        logger.info(f"Using cached output for command: {command}")
-        self.history_manager.append_to_history(
-            command,
-            cached_output,
-            cached_command,
-            "Success (Cached)",
-            None,
-            used_cache=True,
-            tokens_used=None,
-            model_used=None,
-        )
-        return cached_output
