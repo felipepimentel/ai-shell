@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from ai_shell.ai_shell import AIShell
-from ai_shell.datatypes import AIShellResult
+from ai_shell.models import AIShellResult
 
 
 @pytest.fixture

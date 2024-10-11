@@ -10,7 +10,7 @@ from .command.command_generator import CommandGenerator
 from .command.command_processor import CommandProcessor
 from .config import config
 from .context_manager import ContextManager
-from .datatypes import AIShellResult
+from .models import AIShellResult
 from .error_manager import ErrorHandler
 from .ui_handler import UIHandler
 from .utils.cache import init_cache

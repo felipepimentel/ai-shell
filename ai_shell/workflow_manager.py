@@ -1,11 +1,8 @@
 from typing import Any, Dict, List
 
-from ai_shell.command.command_executor import CommandExecutor
-from ai_shell.dependency_handler import (
-    check_and_install_dependency,
-    install_dependency,
-)
-from ai_shell.utils.logger import get_logger
+from .command.command_executor import CommandExecutor
+from .dependency_handler import check_and_install_dependency, install_dependency
+from .utils.logger import get_logger
 
 logger = get_logger("ai_shell.workflow_manager")
 
@@ -74,10 +71,7 @@ class WorkflowManager:
         return True
 
     async def pause_workflow(self):
-        for step in self.current_workflow:
-            if step["status"] == "pending":
-                return True
-        return False
+        return any(step["status"] == "pending" for step in self.current_workflow)
 
     def get_workflow_status(self) -> Dict[str, Any]:
         total_steps = len(self.current_workflow)
@@ -114,15 +108,12 @@ class WorkflowManager:
 
     async def attempt_error_resolution(self, error: Exception) -> bool:
         if isinstance(error, ImportError):
-            # Attempt to install the missing module
             module_name = str(error).split("'")[1]
             logger.info(f"Attempting to install missing module: {module_name}")
-            success = await install_dependency(module_name)
-            return success
+            return await install_dependency(module_name)
         elif isinstance(error, PermissionError):
             logger.warning(
                 "Permission error encountered. Consider running the command with elevated privileges."
             )
             return False
-        # Add more error resolution strategies as needed
         return False

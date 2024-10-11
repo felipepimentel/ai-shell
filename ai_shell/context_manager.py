@@ -1,7 +1,7 @@
 from typing import Any, Dict, List
 
 from .config import config
-from .datatypes import CommandHistoryEntry
+from .models import CommandHistoryEntry
 
 
 class ContextManager:

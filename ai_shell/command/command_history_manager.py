@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import aiofiles
 
-from ..datatypes import CommandHistoryEntry
+from ..models import CommandHistoryEntry
 
 
 class CommandHistoryManager:
