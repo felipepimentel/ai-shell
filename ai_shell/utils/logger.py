@@ -26,9 +26,9 @@ class ErrorHandler:
 class LoggerManager:
     def __init__(self):
         self.console = None
+        self.logger = self._configure_logger()
 
-    def setup_logging(self, console=None):
-        self.console = console
+    def _configure_logger(self):
         structlog.configure(
             processors=[
                 structlog.stdlib.filter_by_level,
@@ -52,11 +52,14 @@ class LoggerManager:
             handlers=[logging.FileHandler("ai_shell.log")],  # Apenas log em arquivo
         )
 
+        return structlog.get_logger()
+
+    def setup_logging(self, console=None):
+        self.console = console
+        # The logger is already configured in __init__, so we don't need to do anything here
+
     def get_logger(self, name: str):
-        logger = structlog.get_logger(name)
-        if config.verbose_mode:
-            logger = logger.bind(verbose=True)
-        return logger
+        return self.logger.bind(module=name)
 
 
 logger_manager = LoggerManager()
@@ -68,3 +71,13 @@ def setup_logging(console=None):
 
 def get_logger(name: str):
     return logger_manager.get_logger(name)
+
+
+def log_error(message: str):
+    logger = get_logger("error")
+    logger.error(message)
+
+
+def log_info(message: str):
+    logger = get_logger("info")
+    logger.info(message)

@@ -1,15 +1,17 @@
-import os
-from typing import Any, Dict, List
-
-from .user_preferences_manager import UserPreferencesManager
-
+from typing import List, Dict, Any
+from ..datatypes import CommandHistoryEntry
 
 class ContextBuilder:
-    @staticmethod
-    def build_enhanced_context(recent_commands: List[str]) -> Dict[str, Any]:
-        return {
-            "current_directory": os.getcwd(),
-            "environment_variables": dict(os.environ),
-            "recent_commands": recent_commands,
-            "user_preferences": UserPreferencesManager.get_user_preferences(),
+    def build_enhanced_context(self, recent_commands: List[CommandHistoryEntry]) -> Dict[str, Any]:
+        context = {
+            "recent_commands": [
+                {
+                    "command": entry.command,
+                    "output": entry.output,
+                    "status": entry.status
+                }
+                for entry in recent_commands
+            ]
         }
+        # Add any other relevant context information here
+        return context

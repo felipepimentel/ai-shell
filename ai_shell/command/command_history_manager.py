@@ -3,6 +3,7 @@ import json
 import os
 import time
 from typing import List, Optional
+from datetime import datetime
 
 import aiofiles
 
@@ -15,9 +16,9 @@ class CommandHistoryManager:
 
     def append_to_history(
         self,
-        user_command: str,
+        command: str,
         output: str,
-        ai_response: Optional[str],
+        ai_response: str,
         status: str,
         error_message: Optional[str],
         used_cache: bool,
@@ -26,16 +27,15 @@ class CommandHistoryManager:
     ) -> None:
         self.history.append(
             CommandHistoryEntry(
-                command=user_command,
+                command=command,
                 output=output,
-                timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-                working_directory=os.getcwd(),
                 ai_response=ai_response,
                 status=status,
                 error_message=error_message,
                 used_cache=used_cache,
                 tokens_used=tokens_used,
                 model_used=model_used,
+                timestamp=datetime.now()  # Usamos datetime.now() em vez de uma string formatada
             )
         )
         asyncio.create_task(self.save_history())
@@ -43,7 +43,7 @@ class CommandHistoryManager:
     async def save_history(self) -> None:
         async with aiofiles.open("ai_command_history.json", "w") as f:
             await f.write(
-                json.dumps([entry.__dict__ for entry in self.history], indent=2)
+                json.dumps([entry.__dict__ for entry in self.history], indent=2, default=str)
             )
 
     def get_recent_commands(self, limit: int = 10) -> List[str]:

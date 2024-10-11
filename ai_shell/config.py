@@ -2,7 +2,9 @@ import os
 from typing import Dict, List
 
 import yaml
+from dotenv import load_dotenv
 
+load_dotenv()
 
 class Config:
     def __init__(self, filename: str = "config.yaml"):
@@ -40,5 +42,10 @@ class Config:
         self.simulation_mode = not self.simulation_mode
         return self.simulation_mode
 
-
 config = Config()
+
+def get_config() -> Config:
+    return config
+
+# Export both config and get_config
+__all__ = ['config', 'get_config']

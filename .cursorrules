@@ -3,80 +3,95 @@
 ### Key Principles
 
 - Write concise, technical responses with accurate Python examples.
-- Use functional, declarative programming; avoid classes where functional alternatives exist.
+- Prefer functional, declarative programming; use classes only when necessary.
 - Prioritize modularization and reuse over code duplication.
-- Use descriptive variable names with auxiliary verbs (e.g., is_active, has_permission).
-- Use lowercase with underscores for directories and files (e.g., handlers/ui_handler.py, core/datatypes.py, utils/logger.py).
+- Use descriptive variable names with auxiliary verbs (e.g., `is_active`, `has_permission`).
+- Follow lowercase with underscores for directories, files, and function names (e.g., `handlers/ui_handler.py`, `core/datatypes.py`, `utils/logger.py`).
 - Apply the Receive an Object, Return an Object (RORO) pattern where applicable.
-- Ensure that the UI logic is centralized within `ui_handler.py`.
-- Store entities, enums, and type definitions in `datatypes.py` for consistency and reusability across the project.
+- Centralize UI logic within `ui_handler.py`.
+- Store entities, enums, and type definitions in `datatypes.py` for consistency and reusability.
 
 ### File-Specific Responsibilities
 
 #### `config.py`
 
-- Centralize the configuration management of the CLI in this file.
-- Store environment variables, default settings, and configuration parameters.
-- Use Python’s `os.environ` and `dotenv` for managing environment variables.
-- Implement functions that load, validate, and retrieve configurations as needed throughout the application.
-- Ensure that `config.py` provides a single source of truth for all settings, allowing easy access to configuration values from any module.
-- Provide defaults but allow for overrides through environment variables or config files.
+- Centralize configuration management.
+- Manage environment variables, default settings, and configuration parameters.
+- Use `os.environ` and `python-dotenv` for environment variable management.
+- Implement functions to load, validate, and retrieve configurations.
+- Provide a single source of truth for all settings.
+- Allow for overrides through environment variables or config files.
 
-#### `/utils/logger.py`
+#### `/ai_shell/utils/logger.py`
 
-- Implement centralized logging functionality in this file.
-- Use the `logging` module or third-party libraries like `structlog` to provide structured, context-aware logging.
-- Ensure that all logs can be configured through `config.py` to adjust logging levels (e.g., DEBUG, INFO, ERROR) based on the environment (development vs. production).
-- Support both console and file-based logging.
-- Provide convenience functions for logging across the project to maintain a consistent logging format and output.
-- Include performance metrics (e.g., execution time) and error tracking as part of logging functionality.
+- Implement logging using Python's built-in `logging` module.
+- Configure logging levels and format through `config.py`.
+- Support console-based logging and file logging if necessary.
+- Provide convenience functions for consistent logging across the project.
 
-#### `/utils/cache.py`
+#### `/ai_shell/utils/cache.py`
 
-- Implement caching logic for reusable data or expensive operations.
-- Use in-memory caching mechanisms like `functools.lru_cache` for local caching or external systems like Redis for distributed caching if needed.
-- Ensure that this file provides easy-to-use functions to store, retrieve, and invalidate cache entries.
-- Support different cache policies (e.g., TTL-based, size-limited caches).
-- Expose a clear API to cache frequently accessed or computed data within the CLI to improve performance.
-- Ensure that the cache is optional and configurable through `config.py`, with fallback strategies in case caching is disabled or unavailable.
+- Implement in-memory caching using `functools.lru_cache`.
+- Provide functions to store and retrieve cache entries.
+- Make caching configurable via `config.py`.
 
 ### Python Development Practices
 
-- Use `def` for pure functions and `async def` for asynchronous operations.
-- Ensure that all functions are properly annotated with type hints.
-- Use `dataclasses` in `datatypes.py` to define structured data models.
-- Prefer comprehensions over loops for concise and efficient iteration.
-- Use concise, one-line syntax for simple conditional statements (e.g., `if condition: do_something()`).
-- Avoid unnecessary else statements by using early returns for error conditions and edge cases.
+- Use `def` for pure functions, `async def` for asynchronous operations.
+- Consistently apply type hints for all functions.
+- Use `dataclasses` in `datatypes.py` for structured data models.
+- Prefer comprehensions over loops for concise iteration.
+- Avoid unnecessary `else` statements; use guard clauses and early returns.
+- Avoid deep nesting to maintain code readability.
 
 ### Error Handling and Validation
 
-- Prioritize error handling and edge cases early in functions to avoid deeply nested logic.
-- Use guard clauses to handle invalid states or preconditions early in the function.
-- Implement proper logging through `/utils/logger.py` and provide user-friendly error messages.
-- Prefer early returns for error conditions to improve code clarity.
-- Define and raise custom exceptions for consistent error handling.
+- Handle basic errors and edge cases.
+- Use guard clauses for preconditions and argument validation.
+- Provide meaningful error messages for common issues.
+- Favor early exits for error conditions to reduce indentation levels.
 
 ### Project Structure and Conventions
 
-- Organize CLI command handlers, utilities, and configuration in a modular structure.
-- Centralize UI-related logic in `ui_handler.py` for a clean separation of concerns.
-- Store all enums, structured entities, and core types in `datatypes.py` to maintain consistency across the application.
-- Use dependency injection to pass shared resources like configuration and state.
-- Ensure that commands are modular, reusable, and easy to extend.
-- For external processes or system commands, ensure non-blocking execution using `asyncio` where needed.
+- Follow a simple, modular structure for organizing code.
+- Centralize UI logic in `ui_handler.py`.
+- Use `datatypes.py` for shared data structures across modules.
+- Design commands to be modular, composable, and reusable.
+- Use `asyncio` for non-blocking execution of external processes.
 
 ### Modern Python Best Practices
 
-- Use type hints extensively to improve code readability and maintainability.
-- Leverage `dataclasses` for structured data and to replace simple classes where applicable.
 - Use f-strings for string formatting.
-- Use pathlib for handling file paths to ensure cross-platform compatibility.
-- Write clean, modular, and reusable functions to support long-term scalability.
+- Leverage `pathlib` for file path handling.
+- Implement core logic using type hints and dataclasses.
+- Apply comprehensions for concise and efficient iterations.
 
 ### Performance Considerations
 
-- Minimize blocking I/O operations; prefer asynchronous execution for external processes and file operations.
-- Ensure commands are executed efficiently, with proper handling of concurrency and parallelism where necessary.
-- Optimize the CLI's responsiveness, especially in scenarios involving user interaction or large data processing.
-- Use `/utils/cache.py` to speed up frequently repeated operations or data lookups.
+- Use asynchronous operations for potentially blocking I/O.
+- Apply caching to reduce redundant computations.
+- Optimize CLI responsiveness for common user interactions.
+
+### Maintainability and Scalability
+
+- Follow the Single Responsibility Principle (SRP) for modules and functions.
+- Keep the codebase clean and maintainable for future scaling.
+- Ensure versioning for compatibility across project iterations.
+
+### Testing Practices
+
+- Use `pytest` for writing unit and integration tests.
+- Aim for high test coverage on critical components (e.g., command processor, UI handler).
+- Implement test cases for edge conditions and error handling.
+- Use mocks and fixtures to isolate external dependencies.
+- Ensure that all tests run in isolation and produce consistent results.
+
+### Dependency Management
+
+- Use `poetry` for dependency management and packaging.
+  - Define project dependencies in `pyproject.toml`.
+  - Use `poetry.lock` for reproducible builds.
+  - Install dependencies using `poetry install`.
+  - Add new dependencies with `poetry add <package>`.
+  - Run tests using `poetry run pytest`.
+- Ensure that development and production dependencies are clearly separated (e.g., `dev-dependencies` section in `pyproject.toml`).
