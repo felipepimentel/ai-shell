@@ -1,8 +1,10 @@
-from rich.console import Console
-from rich.syntax import Syntax
+from typing import List, Optional
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
-from typing import List, Optional
+from rich.console import Console
+from rich.syntax import Syntax
+
 
 class UIHandler:
     def __init__(self, console: Optional[Console] = None):
@@ -10,7 +12,6 @@ class UIHandler:
         self.session = PromptSession()
 
     def format_ai_response(self, response: str) -> str:
-        # Formata a resposta da IA para exibição
         return Syntax(response, "bash", theme="monokai", line_numbers=True)
 
     def display_ai_response(self, response: str):
@@ -18,22 +19,30 @@ class UIHandler:
 
     async def confirm_execution(self) -> str:
         return await self.session.prompt_async(
-            HTML('<ansiyellow>Press [Enter] to execute, [e] to edit, or [q] to quit: </ansiyellow>')
+            HTML(
+                "<ansiyellow>Press [Enter] to execute, [e] to edit, or [q] to quit: </ansiyellow>"
+            )
         )
 
-    async def get_conflict_resolution_choice(self, conflict: str, options: List[str]) -> Optional[str]:
+    async def get_conflict_resolution_choice(
+        self, conflict: str, options: List[str]
+    ) -> Optional[str]:
         self.console.print("[bold yellow]Conflict detected:[/bold yellow]")
         self.console.print(conflict)
-        self.console.print("[bold yellow]Please choose a resolution option:[/bold yellow]")
-        
+        self.console.print(
+            "[bold yellow]Please choose a resolution option:[/bold yellow]"
+        )
+
         for i, option in enumerate(options, 1):
             self.console.print(f"{i}. {option}")
-        
+
         while True:
             choice = await self.session.prompt_async(
-                HTML('<ansiyellow>Enter the number of your choice (or "q" to quit): </ansiyellow>')
+                HTML(
+                    '<ansiyellow>Enter the number of your choice (or "q" to quit): </ansiyellow>'
+                )
             )
-            if choice.lower() == 'q':
+            if choice.lower() == "q":
                 return None
             try:
                 choice_index = int(choice) - 1
@@ -43,19 +52,23 @@ class UIHandler:
                 pass
             self.console.print("[bold red]Invalid choice. Please try again.[/bold red]")
 
-    async def get_error_resolution_choice(self, error_output: str, options: List[str]) -> Optional[str]:
+    async def get_error_resolution_choice(
+        self, error_output: str, options: List[str]
+    ) -> Optional[str]:
         self.console.print("[bold red]Command execution failed:[/bold red]")
         self.console.print(error_output)
         self.console.print("[bold yellow]Please choose an action:[/bold yellow]")
-        
+
         for i, option in enumerate(options, 1):
             self.console.print(f"{i}. {option}")
-        
+
         while True:
             choice = await self.session.prompt_async(
-                HTML('<ansiyellow>Enter the number of your choice (or "q" to quit): </ansiyellow>')
+                HTML(
+                    '<ansiyellow>Enter the number of your choice (or "q" to quit): </ansiyellow>'
+                )
             )
-            if choice.lower() == 'q':
+            if choice.lower() == "q":
                 return None
             try:
                 choice_index = int(choice) - 1
@@ -66,19 +79,22 @@ class UIHandler:
             self.console.print("[bold red]Invalid choice. Please try again.[/bold red]")
 
     async def edit_command(self, command: str) -> str:
-        self.console.print("[bold yellow]Editing mode. Press [Enter] to keep the current line unchanged.[/bold yellow]")
+        self.console.print(
+            "[bold yellow]Editing mode. Press [Enter] to keep the current line unchanged.[/bold yellow]"
+        )
         edited_command = await self.session.prompt_async(
-            HTML('<ansiyellow>Edit the command: </ansiyellow>'),
-            default=command
+            HTML("<ansiyellow>Edit the command: </ansiyellow>"), default=command
         )
         return edited_command
 
     async def edit_multiline(self, text: str) -> str:
-        self.console.print("[bold yellow]Editing mode. Press [Esc] then [Enter] to finish editing.[/bold yellow]")
+        self.console.print(
+            "[bold yellow]Editing mode. Press [Esc] then [Enter] to finish editing.[/bold yellow]"
+        )
         edited_text = await self.session.prompt_async(
-            HTML('<ansiyellow>Edit the text:\n</ansiyellow>'),
+            HTML("<ansiyellow>Edit the text:\n</ansiyellow>"),
             default=text,
-            multiline=True
+            multiline=True,
         )
         return edited_text
 
@@ -88,7 +104,9 @@ class UIHandler:
 
     def display_welcome_message(self):
         self.console.print("[bold blue]Welcome to AI Shell![/bold blue]")
-        self.console.print("Type your commands or questions, and I'll do my best to help.")
+        self.console.print(
+            "Type your commands or questions, and I'll do my best to help."
+        )
         self.console.print("Type 'exit' to quit, 'help' for more information.")
 
     def display_help(self):
@@ -108,5 +126,3 @@ class UIHandler:
     def display_simulation_mode(self, simulation_mode: bool):
         status = "ON" if simulation_mode else "OFF"
         self.console.print(f"[bold blue]Simulation mode is now {status}[/bold blue]")
-
-    # ... (other methods)

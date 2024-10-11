@@ -1,9 +1,11 @@
-from typing import Tuple, Optional
-from ai_shell.utils.logger import get_logger
-import subprocess
 import os
+import subprocess
+from typing import Optional, Tuple
+
+from ai_shell.utils.logger import get_logger
 
 logger = get_logger("ai_shell.error_handler")
+
 
 def handle_error(error: Exception) -> Tuple[str, Optional[str]]:
     error_message = str(error)
@@ -28,12 +30,16 @@ def handle_error(error: Exception) -> Tuple[str, Optional[str]]:
         suggestion = f"OS error: {os.strerror(error.errno)}. Check system resources and permissions."
     else:
         logger.error(f"Unhandled error: {error_message}")
-        suggestion = "An unexpected error occurred. Please check the logs for more information."
+        suggestion = (
+            "An unexpected error occurred. Please check the logs for more information."
+        )
 
     return error_message, suggestion
 
+
 def log_error(error: Exception, context: dict = None):
     logger.error(f"Error occurred: {str(error)}", extra=context)
+
 
 def suggest_fix(error: Exception) -> str:
     _, suggestion = handle_error(error)

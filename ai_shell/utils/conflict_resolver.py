@@ -1,12 +1,14 @@
-from enum import Enum
-from typing import Optional
+import asyncio
 import os
 import shutil
-import asyncio
+from enum import Enum
+from typing import Optional
+
 
 class ConflictResolution(Enum):
     REMOVE_AND_CLONE = "Remove existing directory and clone"
     CLONE_DIFFERENT_LOCATION = "Clone to a different location"
+
 
 async def detect_conflict(command: str) -> Optional[str]:
     if command.startswith("git clone"):
@@ -23,7 +25,10 @@ async def detect_conflict(command: str) -> Optional[str]:
             return f"Destination already exists: {dest}"
     return None
 
-async def resolve_conflict(conflict: str, resolution: ConflictResolution, original_command: str) -> str:
+
+async def resolve_conflict(
+    conflict: str, resolution: ConflictResolution, original_command: str
+) -> str:
     if resolution == ConflictResolution.REMOVE_AND_CLONE:
         path = original_command.split()[-1]
         await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
@@ -34,6 +39,7 @@ async def resolve_conflict(conflict: str, resolution: ConflictResolution, origin
         return original_command.replace(path, new_path)
     else:
         raise ValueError(f"Invalid resolution option: {resolution}")
+
 
 async def clone_different_location(path: str) -> str:
     base, name = os.path.split(path)

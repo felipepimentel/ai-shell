@@ -1,24 +1,15 @@
 from __future__ import annotations
 
-import asyncio
-import os
-from typing import TYPE_CHECKING, List, Optional, Callable, Dict, Any
-from datetime import datetime
+from typing import TYPE_CHECKING, Optional
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.patch_stdout import patch_stdout
-
-from ..config import config
 from ..utils.logger import get_logger
 from .command_history_manager import CommandHistoryManager  # Add this import
 
 if TYPE_CHECKING:
-    from .command_executor import CommandExecutor
-    from .command_cache_manager import CommandCacheManager
-    from .command_generator import CommandGenerator
-    from .context_builder import ContextBuilder
+    pass
 
 logger = get_logger(__name__)
+
 
 class CommandProcessor:
     def __init__(self):
@@ -32,7 +23,9 @@ class CommandProcessor:
         context = self.context_builder.build_enhanced_context(
             self.history_manager.get_recent_commands(5)
         )
-        ai_response, _, _ = await self.command_generator.generate_command(command, context)
+        ai_response, _, _ = await self.command_generator.generate_command(
+            command, context
+        )
         return ai_response
 
     async def process_command(
@@ -45,9 +38,13 @@ class CommandProcessor:
         use_cache: bool = True,
     ) -> Optional[str]:
         if use_cache:
-            cached_command, cached_output = await self.cache_manager.check_cache(command)
+            cached_command, cached_output = await self.cache_manager.check_cache(
+                command
+            )
             if cached_command and cached_output:
-                return self._handle_cached_output(command, cached_command, cached_output)
+                return self._handle_cached_output(
+                    command, cached_command, cached_output
+                )
 
         output = await self.command_executor.execute_command(
             ai_response, simulation_mode, verbose_mode
@@ -64,7 +61,7 @@ class CommandProcessor:
                 error_message=None,
                 used_cache=False,
                 tokens_used=None,
-                model_used=None
+                model_used=None,
             )
 
         return output

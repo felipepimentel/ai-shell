@@ -1,7 +1,7 @@
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import List, Optional
-from datetime import datetime
 
 
 @dataclass
@@ -20,7 +20,7 @@ class CommandHistoryEntry:
     used_cache: bool
     tokens_used: Optional[int]
     model_used: Optional[str]
-    timestamp: datetime = datetime.now()  # Adicionamos o campo timestamp com um valor padrão
+    timestamp: datetime = datetime.now()
 
 
 class ErrorType(Enum):

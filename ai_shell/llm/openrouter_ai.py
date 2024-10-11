@@ -1,5 +1,4 @@
 import os
-from typing import Any, Dict, Tuple
 
 import aiohttp
 from dotenv import load_dotenv
@@ -18,23 +17,25 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 class OpenRouterAI:
     async def generate(self, prompt: str) -> str:
         logger.info(f"Generating response for prompt: {prompt[:50]}...")
-        
+
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-        
+
         data = {
             "model": OPENROUTER_MODEL,
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": [{"role": "user", "content": prompt}],
         }
-        
+
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(OPENROUTER_URL, json=data, headers=headers) as response:
+                async with session.post(
+                    OPENROUTER_URL, json=data, headers=headers
+                ) as response:
                     if response.status == 200:
                         result = await response.json()
-                        generated_text = result['choices'][0]['message']['content']
+                        generated_text = result["choices"][0]["message"]["content"]
                         logger.info(f"Generated response: {generated_text[:50]}...")
                         return generated_text
                     else:

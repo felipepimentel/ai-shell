@@ -1,7 +1,8 @@
+import asyncio
 import os
 import platform
 import pwd
-import asyncio
+
 
 async def get_system_info():
     try:

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Tuple, Callable, Any
 from functools import wraps
+from typing import Any, Callable, Tuple
 
 import aiosqlite
 
@@ -42,7 +42,7 @@ async def check_cache(prompt: str) -> Tuple[str | None, str | None]:
 async def save_cache(command: str, generated_command: str, output: Any):
     # Converta o output para string se não for None
     output_str = str(output) if output is not None else ""
-    
+
     await init_cache()  # Ensure the table exists before inserting
     async with aiosqlite.connect("cache.db") as db:
         await db.execute(
@@ -68,11 +68,12 @@ def cache_result(func: Callable) -> Callable:
     """
     A decorator that caches the result of a function.
     """
+
     @wraps(func)
     async def wrapper(*args, **kwargs):
         # Generate a cache key based on the function name and arguments
         cache_key = f"{func.__name__}:{args}:{kwargs}"
-        
+
         # Check if the result is in the cache
         cached_result, _ = await check_cache(cache_key)
         if cached_result:

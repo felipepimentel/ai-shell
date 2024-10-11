@@ -45,8 +45,5 @@ async def test_process_command_failure(ai_shell):
     result = await ai_shell.process_command("Run invalid command")
 
     assert isinstance(result, AIShellResult)
-    assert result.success == False
+    assert not result.success
     assert "Command not found" in result.message
-
-
-# Add more tests as needed

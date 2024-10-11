@@ -1,4 +1,5 @@
-from typing import Dict, Any
+from typing import Any, Dict
+
 
 def analyze_error(error: Exception) -> Dict[str, Any]:
     """
@@ -7,7 +8,7 @@ def analyze_error(error: Exception) -> Dict[str, Any]:
     error_analysis = {
         "type": type(error).__name__,
         "message": str(error),
-        "details": {}
+        "details": {},
     }
 
     if isinstance(error, ImportError):
@@ -19,12 +20,13 @@ def analyze_error(error: Exception) -> Dict[str, Any]:
 
     return error_analysis
 
+
 def suggest_fix(error_analysis: Dict[str, Any], context: Dict[str, Any]) -> str:
     """
     Suggest a fix based on the error analysis and context.
     """
     error_type = error_analysis["type"]
-    
+
     if error_type == "ImportError":
         missing_module = error_analysis["details"].get("missing_module")
         return f"Try installing the missing module: pip install {missing_module}"

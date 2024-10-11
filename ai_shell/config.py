@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class Config:
     def __init__(self, filename: str = "config.yaml"):
         self._config = self._load_config(filename)
@@ -17,7 +18,9 @@ class Config:
         self.simulate_command: str = "simulate"
         self.prompt_timeout: int = 30
         self.default_timeout: int = self._config.get("default_timeout", 120)
-        self.long_running_timeout: int = self._config.get("long_running_timeout", 600)  # 10 minutos
+        self.long_running_timeout: int = self._config.get(
+            "long_running_timeout", 600
+        )  # 10 minutos
         self.verbose_mode: bool = self._config.get("verbose_mode", False)
         self.aliases: Dict[str, str] = self._config.get("aliases", {})
         self.simulation_mode: bool = self._config.get("simulation_mode", False)
@@ -42,10 +45,13 @@ class Config:
         self.simulation_mode = not self.simulation_mode
         return self.simulation_mode
 
+
 config = Config()
+
 
 def get_config() -> Config:
     return config
 
+
 # Export both config and get_config
-__all__ = ['config', 'get_config']
+__all__ = ["config", "get_config"]

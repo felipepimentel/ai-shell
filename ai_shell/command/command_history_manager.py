@@ -1,9 +1,7 @@
 import asyncio
 import json
-import os
-import time
-from typing import List, Optional
 from datetime import datetime
+from typing import List, Optional
 
 import aiofiles
 
@@ -35,7 +33,7 @@ class CommandHistoryManager:
                 used_cache=used_cache,
                 tokens_used=tokens_used,
                 model_used=model_used,
-                timestamp=datetime.now()  # Usamos datetime.now() em vez de uma string formatada
+                timestamp=datetime.now(),  # Usamos datetime.now() em vez de uma string formatada
             )
         )
         asyncio.create_task(self.save_history())
@@ -43,7 +41,9 @@ class CommandHistoryManager:
     async def save_history(self) -> None:
         async with aiofiles.open("ai_command_history.json", "w") as f:
             await f.write(
-                json.dumps([entry.__dict__ for entry in self.history], indent=2, default=str)
+                json.dumps(
+                    [entry.__dict__ for entry in self.history], indent=2, default=str
+                )
             )
 
     def get_recent_commands(self, limit: int = 10) -> List[str]:

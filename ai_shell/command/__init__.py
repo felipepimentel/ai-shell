@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 from ..utils.logger import get_logger
@@ -18,7 +17,11 @@ logger = get_logger("ai_shell.command")
 
 MAX_RETRIES = 3
 
-# Remove the instantiation of CommandProcessor from here
-# command_processor = CommandProcessor(...)
-
-__all__ = ["CommandProcessor", "CommandExecutor", "CommandGenerator", "CommandHistoryManager", "ContextBuilder", "CommandCacheManager"]
+__all__ = [
+    "CommandProcessor",
+    "CommandExecutor",
+    "CommandGenerator",
+    "CommandHistoryManager",
+    "ContextBuilder",
+    "CommandCacheManager",
+]

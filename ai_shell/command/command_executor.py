@@ -1,49 +1,55 @@
 import asyncio
 import os
-import signal
-from concurrent.futures import ProcessPoolExecutor
-from typing import Optional, Tuple, Callable, List
 import shlex
+import signal
 import traceback
+from concurrent.futures import ProcessPoolExecutor
+from typing import Callable, List, Optional, Tuple
 
 from ..utils.logger import get_logger
-from ..config import config
 
 logger = get_logger(__name__)
+
 
 class CommandExecutor:
     def __init__(self, max_workers: Optional[int] = None) -> None:
         self.executor = ProcessPoolExecutor(max_workers=max_workers or os.cpu_count())
 
-    async def execute_command(self, command: str, timeout: int = 300) -> Tuple[str, int]:
+    async def execute_command(
+        self, command: str, timeout: int = 300
+    ) -> Tuple[str, int]:
         logger.info(f"Starting execution of command: {command}")
         try:
             process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
 
             logger.debug("Subprocess created, waiting for completion")
 
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=timeout
+                )
 
                 output = stdout.decode().strip()
                 error_output = stderr.decode().strip()
-                
+
                 logger.info(f"Command executed with return code: {process.returncode}")
                 logger.debug(f"Command output: {output}")
-                
+
                 if process.returncode != 0:
-                    logger.error(f"Command failed with return code: {process.returncode}")
+                    logger.error(
+                        f"Command failed with return code: {process.returncode}"
+                    )
                     logger.error(f"Error output: {error_output}")
                     return f"Error: {error_output}", process.returncode
 
                 return output, process.returncode
 
             except asyncio.TimeoutError:
-                logger.error(f"Command execution timed out after {timeout} seconds: {command}")
+                logger.error(
+                    f"Command execution timed out after {timeout} seconds: {command}"
+                )
                 process.terminate()
                 return f"Error: Command execution timed out after {timeout} seconds.", 1
 
@@ -81,11 +87,14 @@ class CommandExecutor:
 
         return simulated_output, 0
 
-    async def execute_command_with_timeout(self, command: str, timeout: int, progress_callback: Optional[Callable[[int], None]] = None) -> Tuple[str, int]:
+    async def execute_command_with_timeout(
+        self,
+        command: str,
+        timeout: int,
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> Tuple[str, int]:
         process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
 
         try:
@@ -115,7 +124,12 @@ class CommandExecutor:
             process.terminate()
             return "Error: Command execution was cancelled", 1
 
-    async def execute_long_running_command(self, command: str, timeout: int, progress_callback: Callable[[str], None] = None) -> Tuple[str, int]:
+    async def execute_long_running_command(
+        self,
+        command: str,
+        timeout: int,
+        progress_callback: Callable[[str], None] = None,
+    ) -> Tuple[str, int]:
         return await self.execute_command(command, timeout, progress_callback)
 
     async def cancel_command(self, process):
@@ -135,9 +149,9 @@ class CommandExecutor:
         elif args[1] == "clone":
             return f"[Simulation] Would clone repository from: {args[2]}"
         elif args[1] == "push":
-            return f"[Simulation] Would push changes to remote repository"
+            return "[Simulation] Would push changes to remote repository"
         elif args[1] == "pull":
-            return f"[Simulation] Would pull changes from remote repository"
+            return "[Simulation] Would pull changes from remote repository"
         else:
             return f"[Simulation] Would execute Git command: {' '.join(args[1:])}"
 

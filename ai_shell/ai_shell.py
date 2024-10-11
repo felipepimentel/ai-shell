@@ -1,9 +1,9 @@
 import asyncio
 import os
+import pwd
 import sys
 import traceback
 from typing import Any, Dict, List
-import shlex
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
@@ -12,10 +12,10 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from rich.theme import Theme
 
+from ai_shell.command.command_cache_manager import CommandCacheManager
 from ai_shell.command.command_executor import CommandExecutor
 from ai_shell.command.command_generator import CommandGenerator
 from ai_shell.command.command_processor import CommandProcessor
-from ai_shell.command.command_cache_manager import CommandCacheManager
 from ai_shell.command.context_builder import ContextBuilder
 from ai_shell.config import config
 from ai_shell.datatypes import AIShellResult
@@ -30,9 +30,6 @@ from ai_shell.utils.conflict_resolver import detect_conflict, resolve_conflict
 from ai_shell.utils.dependency_manager import install_dependency
 from ai_shell.utils.error_analyzer import analyze_error, suggest_fix
 from ai_shell.utils.logger import get_logger, log_info, setup_logging
-import socket
-import aiohttp
-import pwd
 
 setup_logging()
 logger = get_logger("ai_shell.ai_shell")
@@ -52,8 +49,7 @@ class AIShell:
         self.context_builder = ContextBuilder()
         self.processor = CommandProcessor()
         self.logger = logger
-        
-        # Initialize the processor with required components
+
         self.processor.command_generator = self.command_generator
         self.processor.command_executor = self.command_executor
         self.processor.cache_manager = self.cache_manager
@@ -67,14 +63,9 @@ class AIShell:
         return cls(command_generator, command_executor, ui_handler)
 
     async def initialize(self):
-        # Perform any necessary initialization here
         await init_cache()
-        # Add any other initialization tasks as needed
 
     async def _initialize_context(self) -> Dict[str, Any]:
-        """
-        Initialize and return the context for AI processing.
-        """
         try:
             user = os.getlogin()
         except OSError:
@@ -94,12 +85,18 @@ class AIShell:
             logger.debug(f"Initialized context: {context}")
 
             logger.info("Generating AI response")
-            ai_response, tokens_used, model_used = await self.command_generator.generate_command(user_input, context)
+            (
+                ai_response,
+                tokens_used,
+                model_used,
+            ) = await self.command_generator.generate_command(user_input, context)
             logger.debug(f"AI response generated: {ai_response}")
 
             if ai_response is None:
                 logger.error("AI response is None")
-                return AIShellResult(success=False, message="Failed to generate AI response.")
+                return AIShellResult(
+                    success=False, message="Failed to generate AI response."
+                )
 
             logger.info("Displaying AI response to user")
             self.ui_handler.display_ai_response(ai_response)
@@ -114,32 +111,45 @@ class AIShell:
                 shell_command = await self.ui_handler.edit_command(ai_response)
             else:
                 logger.info("Command execution cancelled by user")
-                return AIShellResult(success=False, message="Command execution cancelled by user.")
+                return AIShellResult(
+                    success=False, message="Command execution cancelled by user."
+                )
 
             logger.info(f"Executing shell command: {shell_command}")
             try:
-                output, exit_code = await self.command_executor.execute_command(shell_command, timeout=600)
+                output, exit_code = await self.command_executor.execute_command(
+                    shell_command, timeout=600
+                )
                 logger.debug(f"Command output: {output}")
                 logger.debug(f"Command exit code: {exit_code}")
 
                 if exit_code != 0:
                     logger.error(f"Command failed with exit code {exit_code}")
-                    return AIShellResult(success=False, message=f"Command failed with exit code {exit_code}. Error: {output}")
+                    return AIShellResult(
+                        success=False,
+                        message=f"Command failed with exit code {exit_code}. Error: {output}",
+                    )
 
                 logger.info("Command executed successfully")
                 return AIShellResult(success=True, message=output)
             except asyncio.TimeoutError:
                 logger.error("Command execution timed out")
-                return AIShellResult(success=False, message="Command execution timed out")
+                return AIShellResult(
+                    success=False, message="Command execution timed out"
+                )
             except Exception as e:
                 logger.error(f"Error executing command: {str(e)}")
                 logger.error(traceback.format_exc())
-                return AIShellResult(success=False, message=f"Error executing command: {str(e)}")
+                return AIShellResult(
+                    success=False, message=f"Error executing command: {str(e)}"
+                )
 
         except Exception as e:
             logger.error(f"Unexpected error in process_command: {str(e)}")
             logger.error(traceback.format_exc())
-            return AIShellResult(success=False, message=f"An unexpected error occurred: {str(e)}")
+            return AIShellResult(
+                success=False, message=f"An unexpected error occurred: {str(e)}"
+            )
 
     async def _handle_conflict(
         self, user_input: str, shell_command: str, conflict: str
@@ -150,12 +160,12 @@ class AIShell:
         )
 
         if not options:
-            return shell_command  # Return original command if no options are generated
+            return shell_command
 
         choice = await self.ui_handler.get_conflict_resolution_choice(conflict, options)
 
         if choice is None:
-            return shell_command  # Return original command if user cancels
+            return shell_command
 
         return await resolve_conflict(conflict, choice, shell_command)
 
@@ -228,7 +238,6 @@ class AIShell:
             return "No action taken"
 
     def _parse_chained_commands(self, user_input: str) -> List[str]:
-        # Simple implementation: split by semicolon
         return [cmd.strip() for cmd in user_input.split(";") if cmd.strip()]
 
     def _handle_missing_dependencies(self, missing_deps: List[str]) -> None:
@@ -260,7 +269,6 @@ class AIShell:
         return execute_command(shell_command, self.logger)
 
     def _format_output(self, output: str) -> str:
-        # Simple implementation: just return the output as is
         return output
 
     def _suggest_fix(self, error: Exception) -> str:
