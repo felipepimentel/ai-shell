@@ -2,8 +2,8 @@ import asyncio
 import signal
 import sys
 
-from ai_shell.ai_shell import AIShell
-from ai_shell.utils.logger import get_logger, setup_logging
+from .ai_shell import AIShell
+from .utils.logger import get_logger, setup_logging
 
 logger = get_logger("ai_shell.cli")
 
