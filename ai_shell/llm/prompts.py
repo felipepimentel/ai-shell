@@ -28,17 +28,9 @@ async def generate_command_from_prompt(
     user_command: str,
     context: Dict[str, Any],
 ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
-    try:
-        # Aqui você implementaria a lógica para gerar o comando usando um modelo de linguagem
-        # Por enquanto, vamos simular uma resposta mais realista
-        generated_command = user_command  # Alterado para retornar o comando do usuário
-        tokens_used = 10
-        model_used = "simulated_model"
-        
-        return generated_command, tokens_used, model_used
-    except Exception as e:
-        logger.error(f"Error generating command from prompt: {str(e)}")
-        return None, None, None
+    # Implementação real aqui
+    # Por enquanto, vamos retornar um valor simulado
+    return user_command, 10, "simulated_model"
 
 def sanitize_command(command: str) -> str:
     command = command.strip('`').strip()

@@ -4,8 +4,10 @@ import signal
 from concurrent.futures import ProcessPoolExecutor
 from typing import Optional, Tuple, Callable, List
 import shlex
+import traceback
 
 from ..utils.logger import get_logger
+from ..config import config
 
 logger = get_logger(__name__)
 
@@ -13,11 +15,45 @@ class CommandExecutor:
     def __init__(self, max_workers: Optional[int] = None) -> None:
         self.executor = ProcessPoolExecutor(max_workers=max_workers or os.cpu_count())
 
-    async def execute_command(self, command: str, simulation_mode: bool, verbose_mode: bool) -> str:
-        if simulation_mode:
-            return await self.simulate_command(command)
-        else:
-            return await self.execute_command_with_timeout(command, timeout=300)  # 5 minutes timeout
+    async def execute_command(self, command: str) -> Tuple[str, int]:
+        logger.info(f"Executing command: {command}")
+        try:
+            # Split the command into arguments
+            args = shlex.split(command)
+            
+            logger.debug(f"Command arguments: {args}")
+            
+            # Create subprocess
+            process = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            logger.debug("Subprocess created, waiting for completion")
+
+            # Wait for the subprocess to finish
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=config.default_timeout)
+
+            # Decode the output
+            output = stdout.decode().strip() if stdout else stderr.decode().strip()
+            
+            logger.info(f"Command executed with return code: {process.returncode}")
+            logger.debug(f"Command output: {output}")
+            
+            if process.returncode != 0:
+                logger.error(f"Command failed with return code: {process.returncode}")
+                logger.error(f"Error output: {stderr.decode().strip()}")
+            
+            return output, process.returncode
+
+        except asyncio.TimeoutError:
+            logger.error(f"Command execution timed out: {command}")
+            return f"Error: Command execution timed out after {config.default_timeout} seconds.", 1
+        except Exception as e:
+            logger.error(f"Error executing command: {command}. Error: {str(e)}")
+            logger.error(traceback.format_exc())
+            return f"Error: {str(e)}", 1
 
     async def simulate_command(self, command: str) -> Tuple[str, int]:
         args = shlex.split(command)

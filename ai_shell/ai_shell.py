@@ -1,23 +1,23 @@
 import asyncio
 import os
 import sys
+import traceback
 from typing import Any, Dict, List
+import shlex
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
-from rich.console import Console
 from rich.theme import Theme
 
-from ai_shell.command.command_cache_manager import CommandCacheManager
 from ai_shell.command.command_executor import CommandExecutor
 from ai_shell.command.command_generator import CommandGenerator
-from ai_shell.command.command_history_manager import CommandHistoryManager
 from ai_shell.command.command_processor import CommandProcessor
+from ai_shell.command.command_cache_manager import CommandCacheManager
 from ai_shell.command.context_builder import ContextBuilder
-from ai_shell.config import config, get_config
+from ai_shell.config import config
 from ai_shell.datatypes import AIShellResult
 from ai_shell.llm.prompts import (
     generate_command_from_prompt,
@@ -29,9 +29,11 @@ from ai_shell.utils.command_executor import execute_command
 from ai_shell.utils.conflict_resolver import detect_conflict, resolve_conflict
 from ai_shell.utils.dependency_manager import install_dependency
 from ai_shell.utils.error_analyzer import analyze_error, suggest_fix
-from ai_shell.utils.logger import ErrorHandler, get_logger, log_info, setup_logging
+from ai_shell.utils.logger import get_logger, log_info, setup_logging
+import socket
+import aiohttp
+import pwd
 
-# Ensure logging is set up before any logger is created
 setup_logging()
 logger = get_logger("ai_shell.ai_shell")
 
@@ -39,95 +41,145 @@ logger = get_logger("ai_shell.ai_shell")
 class AIShell:
     def __init__(
         self,
-        non_interactive=False,
-        dry_run=False,
-        auto_install_deps=False,
-        logger=None,
-        config=None,
+        command_generator: CommandGenerator,
+        command_executor: CommandExecutor,
+        ui_handler: UIHandler,
     ):
-        self.console = Console()
-        self.ui_handler = UIHandler(self.console)
-        setup_logging(self.console)
-        self.logger = logger or get_logger("ai_shell.cli")
-        self.error_handler = ErrorHandler(self.console)
-        self.config = get_config() if config is None else config
-        self.context = None
-        self.interactive_mode = self.config.get("interactive_mode", True)
-        self.non_interactive = non_interactive
-        self.dry_run = dry_run
-        self.auto_install_deps = auto_install_deps
-        self.style = self._create_style()
-
-        # Inicialize os componentes necessários para o CommandProcessor
-        self.command_executor = CommandExecutor()
+        self.command_generator = command_generator
+        self.command_executor = command_executor
+        self.ui_handler = ui_handler
         self.cache_manager = CommandCacheManager()
-        self.command_generator = CommandGenerator()
-        self.history_manager = CommandHistoryManager()
         self.context_builder = ContextBuilder()
+        self.processor = CommandProcessor()
+        self.logger = logger
+        
+        # Initialize the processor with required components
+        self.processor.command_generator = self.command_generator
+        self.processor.command_executor = self.command_executor
+        self.processor.cache_manager = self.cache_manager
+        self.processor.context_builder = self.context_builder
 
-        # Inicialize o CommandProcessor com todos os componentes necessários
-        self.processor = CommandProcessor(
-            command_executor=self.command_executor,
-            cache_manager=self.cache_manager,
-            command_generator=self.command_generator,
-            history_manager=self.history_manager,
-            context_builder=self.context_builder,
-        )
+    @classmethod
+    async def create(cls, non_interactive: bool = False, dry_run: bool = False):
+        command_generator = CommandGenerator()
+        command_executor = CommandExecutor()
+        ui_handler = UIHandler()
+        return cls(command_generator, command_executor, ui_handler)
 
     async def initialize(self):
+        # Perform any necessary initialization here
         await init_cache()
-        self.context = await self._initialize_context()
+        # Add any other initialization tasks as needed
 
     async def _initialize_context(self) -> Dict[str, Any]:
-        return {
-            "os": os.name,
-            "installed_dependencies": await self._get_installed_dependencies(),
-            "command_history": self.processor.history_manager.get_recent_commands(),
-        }
+        """
+        Initialize and return the context for AI processing.
+        """
+        try:
+            user = os.getlogin()
+        except OSError:
+            user = pwd.getpwuid(os.getuid())[0]
 
-    async def _get_installed_dependencies(self) -> List[str]:
-        # Implement logic to get installed dependencies
-        return ["python", "pip"]  # Placeholder
+        return {
+            "current_directory": os.getcwd(),
+            "user": user,
+            "os": sys.platform,
+        }
 
     async def process_command(self, user_input: str) -> AIShellResult:
         try:
             self.logger.info(f"Processing command: {user_input}")
 
-            context = await self._initialize_context()
-            ai_response, tokens_used, model_used = await self.command_generator.generate_command(user_input, context)
-            
-            if ai_response is None:
-                return AIShellResult(success=False, message="Failed to generate AI response.")
+            try:
+                context = await self._initialize_context()
+                self.logger.debug(f"Initialized context: {context}")
+            except Exception as e:
+                self.logger.error(f"Error initializing context: {str(e)}")
+                self.logger.error(traceback.format_exc())
+                return AIShellResult(
+                    success=False, message=f"Failed to initialize context: {str(e)}"
+                )
 
+            self.logger.info("Generating AI response")
+            try:
+                (
+                    ai_response,
+                    tokens_used,
+                    model_used,
+                ) = await self.command_generator.generate_command(user_input, context)
+                self.logger.debug(f"AI response generated: {ai_response}")
+                self.logger.debug(f"Tokens used: {tokens_used}, Model used: {model_used}")
+            except Exception as e:
+                self.logger.error(f"Error generating AI response: {str(e)}")
+                self.logger.error(traceback.format_exc())
+                return AIShellResult(
+                    success=False, message=f"Failed to generate AI response: {str(e)}"
+                )
+
+            if ai_response is None:
+                self.logger.error("AI response is None")
+                return AIShellResult(
+                    success=False, message="Failed to generate AI response."
+                )
+
+            self.logger.info("Displaying AI response to user")
             self.ui_handler.display_ai_response(ai_response)
 
+            self.logger.info("Waiting for user confirmation")
             user_choice = await self.ui_handler.confirm_execution()
+            self.logger.debug(f"User choice: {user_choice}")
+
             if user_choice == "":
                 shell_command = ai_response
             elif user_choice == "e":
                 shell_command = await self.ui_handler.edit_command(ai_response)
             else:
-                return AIShellResult(success=False, message="Command execution cancelled by user.")
+                self.logger.info("Command execution cancelled by user")
+                return AIShellResult(
+                    success=False, message="Command execution cancelled by user."
+                )
 
-            conflict = await detect_conflict(shell_command)
-            if conflict:
-                resolution = await self._handle_conflict(user_input, shell_command, conflict)
-                if isinstance(resolution, AIShellResult):
-                    return resolution
-                shell_command = resolution
+            # Modificar esta parte para formatar corretamente o comando Git
+            if shell_command.startswith("clone "):
+                parts = shlex.split(shell_command)
+                if len(parts) >= 3:
+                    repo_url = parts[1]
+                    dest_path = os.path.expanduser(parts[2])  # Expande o ~ para o caminho completo
+                    shell_command = f"git clone {repo_url} {dest_path}"
+                else:
+                    shell_command = "git " + shell_command
 
-            if self.dry_run:
-                return AIShellResult(success=True, message=self._simulate_command_execution(shell_command))
+            self.logger.info(f"Executing shell command: {shell_command}")
+            try:
+                output, exit_code = await self.command_executor.execute_command(
+                    shell_command
+                )
+                self.logger.debug(f"Command output: {output}")
+                self.logger.debug(f"Command exit code: {exit_code}")
 
-            output, exit_code = await self.command_executor.execute_command(shell_command)
-            
-            success = exit_code == 0
-            message = output
-            
-            return AIShellResult(success=success, message=message)
+                if exit_code != 0:
+                    self.logger.error(f"Command failed with exit code {exit_code}")
+                    self.logger.error(f"Error output: {output}")
+                    return AIShellResult(
+                        success=False,
+                        message=f"Command failed with exit code {exit_code}. Error: {output}"
+                    )
+
+                success = exit_code == 0
+                message = output
+
+                return AIShellResult(success=success, message=message)
+            except Exception as e:
+                self.logger.error(f"Error executing command: {str(e)}")
+                self.logger.error(traceback.format_exc())
+                return AIShellResult(
+                    success=False,
+                    message=f"Error executing command: {str(e)}"
+                )
         except Exception as e:
-            self.logger.error(f"Error in process_command: {str(e)}")
-            return AIShellResult(success=False, message=f"An error occurred: {str(e)}")
+            self.logger.error(f"Unexpected error in process_command: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return AIShellResult(success=False, message=f"An unexpected error occurred: {str(e)}")
 
     async def _handle_conflict(
         self, user_input: str, shell_command: str, conflict: str
@@ -281,7 +333,7 @@ class AIShell:
         self.console.print("\n[error]Execution interrupted by user (Ctrl + C).[/error]")
         sys.exit(0)
 
-    async def process_command(
+    async def process_command_v2(
         self, command: str, use_cache: bool = True
     ) -> AIShellResult:
         try:
@@ -344,7 +396,7 @@ class AIShell:
     async def handle_initial_command(self, args):
         if len(args) > 1:
             initial_command = " ".join(args[1:])
-            output = await self.process_command(initial_command, use_cache=False)
+            output = await self.process_command_v2(initial_command, use_cache=False)
             self.ui_handler.display_command_output(initial_command, output)
             return True
         return False
@@ -410,7 +462,7 @@ class AIShell:
                 elif prompt_text.lower() == config.clear_history_command:
                     self.processor.history_manager.clear_history()
                 else:
-                    await self.process_command(prompt_text)
+                    await self.process_command_v2(prompt_text)
 
         await self.processor.cache_manager.clean_expired_cache()
         self.ui_handler.display_farewell_message()

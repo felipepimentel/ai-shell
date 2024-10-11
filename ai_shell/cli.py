@@ -7,7 +7,7 @@ logger = get_logger("ai_shell.cli")
 
 async def main():
     setup_logging()  # Ensure logging is set up
-    ai_shell = AIShell()
+    ai_shell = await AIShell.create()  # Use the create() method instead of direct instantiation
     await ai_shell.initialize()
     
     if len(sys.argv) > 1:

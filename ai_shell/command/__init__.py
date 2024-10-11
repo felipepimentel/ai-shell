@@ -18,12 +18,7 @@ logger = get_logger("ai_shell.command")
 
 MAX_RETRIES = 3
 
-command_processor = CommandProcessor(
-    CommandExecutor(max_workers=os.cpu_count()),
-    CommandCacheManager(),
-    CommandGenerator(),
-    CommandHistoryManager(),
-    ContextBuilder(),
-)
+# Remove the instantiation of CommandProcessor from here
+# command_processor = CommandProcessor(...)
 
-__all__ = ["command_processor"]
+__all__ = ["CommandProcessor", "CommandExecutor", "CommandGenerator", "CommandHistoryManager", "ContextBuilder", "CommandCacheManager"]

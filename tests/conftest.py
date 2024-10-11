@@ -1,8 +1,11 @@
-import asyncio
 import pytest
+from unittest.mock import AsyncMock, patch
+from ai_shell.ai_shell import AIShell
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+@pytest.fixture
+async def ai_shell():
+    with patch('ai_shell.ai_shell.CommandGenerator'), \
+         patch('ai_shell.ai_shell.CommandExecutor'), \
+         patch('ai_shell.ai_shell.UIHandler'):
+        shell = await AIShell.create(non_interactive=True, dry_run=True)
+        yield shell

@@ -10,30 +10,23 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 from ..config import config
 from ..utils.logger import get_logger
+from .command_history_manager import CommandHistoryManager  # Add this import
 
 if TYPE_CHECKING:
     from .command_executor import CommandExecutor
     from .command_cache_manager import CommandCacheManager
     from .command_generator import CommandGenerator
-    from .command_history_manager import CommandHistoryManager
     from .context_builder import ContextBuilder
 
 logger = get_logger(__name__)
 
 class CommandProcessor:
-    def __init__(
-        self,
-        command_executor: CommandExecutor,
-        cache_manager: CommandCacheManager,
-        command_generator: CommandGenerator,
-        history_manager: CommandHistoryManager,
-        context_builder: ContextBuilder
-    ):
-        self.command_executor = command_executor
-        self.cache_manager = cache_manager
-        self.command_generator = command_generator
-        self.history_manager = history_manager
-        self.context_builder = context_builder
+    def __init__(self):
+        self.history_manager = CommandHistoryManager()
+        self.command_generator = None
+        self.command_executor = None
+        self.cache_manager = None
+        self.context_builder = None
 
     async def generate_ai_response(self, command: str) -> Optional[str]:
         context = self.context_builder.build_enhanced_context(
