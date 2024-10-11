@@ -15,41 +15,38 @@ class CommandExecutor:
     def __init__(self, max_workers: Optional[int] = None) -> None:
         self.executor = ProcessPoolExecutor(max_workers=max_workers or os.cpu_count())
 
-    async def execute_command(self, command: str) -> Tuple[str, int]:
-        logger.info(f"Executing command: {command}")
+    async def execute_command(self, command: str, timeout: int = 300) -> Tuple[str, int]:
+        logger.info(f"Starting execution of command: {command}")
         try:
-            # Split the command into arguments
-            args = shlex.split(command)
-            
-            logger.debug(f"Command arguments: {args}")
-            
-            # Create subprocess
-            process = await asyncio.create_subprocess_exec(
-                *args,
+            process = await asyncio.create_subprocess_shell(
+                command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
 
             logger.debug("Subprocess created, waiting for completion")
 
-            # Wait for the subprocess to finish
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=config.default_timeout)
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
 
-            # Decode the output
-            output = stdout.decode().strip() if stdout else stderr.decode().strip()
-            
-            logger.info(f"Command executed with return code: {process.returncode}")
-            logger.debug(f"Command output: {output}")
-            
-            if process.returncode != 0:
-                logger.error(f"Command failed with return code: {process.returncode}")
-                logger.error(f"Error output: {stderr.decode().strip()}")
-            
-            return output, process.returncode
+                output = stdout.decode().strip()
+                error_output = stderr.decode().strip()
+                
+                logger.info(f"Command executed with return code: {process.returncode}")
+                logger.debug(f"Command output: {output}")
+                
+                if process.returncode != 0:
+                    logger.error(f"Command failed with return code: {process.returncode}")
+                    logger.error(f"Error output: {error_output}")
+                    return f"Error: {error_output}", process.returncode
 
-        except asyncio.TimeoutError:
-            logger.error(f"Command execution timed out: {command}")
-            return f"Error: Command execution timed out after {config.default_timeout} seconds.", 1
+                return output, process.returncode
+
+            except asyncio.TimeoutError:
+                logger.error(f"Command execution timed out after {timeout} seconds: {command}")
+                process.terminate()
+                return f"Error: Command execution timed out after {timeout} seconds.", 1
+
         except Exception as e:
             logger.error(f"Error executing command: {command}. Error: {str(e)}")
             logger.error(traceback.format_exc())
@@ -180,3 +177,7 @@ class CommandExecutor:
         if len(args) < 2:
             return "[Simulation] Error: No file specified for touch command"
         return f"[Simulation] Would create or update timestamp of file: {args[1]}"
+
+    async def shutdown(self):
+        # Implement any cleanup needed
+        logger.info("CommandExecutor shutdown completed.")

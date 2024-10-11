@@ -88,97 +88,57 @@ class AIShell:
 
     async def process_command(self, user_input: str) -> AIShellResult:
         try:
-            self.logger.info(f"Processing command: {user_input}")
+            logger.info(f"Processing command: {user_input}")
 
-            try:
-                context = await self._initialize_context()
-                self.logger.debug(f"Initialized context: {context}")
-            except Exception as e:
-                self.logger.error(f"Error initializing context: {str(e)}")
-                self.logger.error(traceback.format_exc())
-                return AIShellResult(
-                    success=False, message=f"Failed to initialize context: {str(e)}"
-                )
+            context = await self._initialize_context()
+            logger.debug(f"Initialized context: {context}")
 
-            self.logger.info("Generating AI response")
-            try:
-                (
-                    ai_response,
-                    tokens_used,
-                    model_used,
-                ) = await self.command_generator.generate_command(user_input, context)
-                self.logger.debug(f"AI response generated: {ai_response}")
-                self.logger.debug(f"Tokens used: {tokens_used}, Model used: {model_used}")
-            except Exception as e:
-                self.logger.error(f"Error generating AI response: {str(e)}")
-                self.logger.error(traceback.format_exc())
-                return AIShellResult(
-                    success=False, message=f"Failed to generate AI response: {str(e)}"
-                )
+            logger.info("Generating AI response")
+            ai_response, tokens_used, model_used = await self.command_generator.generate_command(user_input, context)
+            logger.debug(f"AI response generated: {ai_response}")
 
             if ai_response is None:
-                self.logger.error("AI response is None")
-                return AIShellResult(
-                    success=False, message="Failed to generate AI response."
-                )
+                logger.error("AI response is None")
+                return AIShellResult(success=False, message="Failed to generate AI response.")
 
-            self.logger.info("Displaying AI response to user")
+            logger.info("Displaying AI response to user")
             self.ui_handler.display_ai_response(ai_response)
 
-            self.logger.info("Waiting for user confirmation")
+            logger.info("Waiting for user confirmation")
             user_choice = await self.ui_handler.confirm_execution()
-            self.logger.debug(f"User choice: {user_choice}")
+            logger.debug(f"User choice: {user_choice}")
 
             if user_choice == "":
                 shell_command = ai_response
             elif user_choice == "e":
                 shell_command = await self.ui_handler.edit_command(ai_response)
             else:
-                self.logger.info("Command execution cancelled by user")
-                return AIShellResult(
-                    success=False, message="Command execution cancelled by user."
-                )
+                logger.info("Command execution cancelled by user")
+                return AIShellResult(success=False, message="Command execution cancelled by user.")
 
-            # Modificar esta parte para formatar corretamente o comando Git
-            if shell_command.startswith("clone "):
-                parts = shlex.split(shell_command)
-                if len(parts) >= 3:
-                    repo_url = parts[1]
-                    dest_path = os.path.expanduser(parts[2])  # Expande o ~ para o caminho completo
-                    shell_command = f"git clone {repo_url} {dest_path}"
-                else:
-                    shell_command = "git " + shell_command
-
-            self.logger.info(f"Executing shell command: {shell_command}")
+            logger.info(f"Executing shell command: {shell_command}")
             try:
-                output, exit_code = await self.command_executor.execute_command(
-                    shell_command
-                )
-                self.logger.debug(f"Command output: {output}")
-                self.logger.debug(f"Command exit code: {exit_code}")
+                output, exit_code = await self.command_executor.execute_command(shell_command, timeout=600)
+                logger.debug(f"Command output: {output}")
+                logger.debug(f"Command exit code: {exit_code}")
 
                 if exit_code != 0:
-                    self.logger.error(f"Command failed with exit code {exit_code}")
-                    self.logger.error(f"Error output: {output}")
-                    return AIShellResult(
-                        success=False,
-                        message=f"Command failed with exit code {exit_code}. Error: {output}"
-                    )
+                    logger.error(f"Command failed with exit code {exit_code}")
+                    return AIShellResult(success=False, message=f"Command failed with exit code {exit_code}. Error: {output}")
 
-                success = exit_code == 0
-                message = output
-
-                return AIShellResult(success=success, message=message)
+                logger.info("Command executed successfully")
+                return AIShellResult(success=True, message=output)
+            except asyncio.TimeoutError:
+                logger.error("Command execution timed out")
+                return AIShellResult(success=False, message="Command execution timed out")
             except Exception as e:
-                self.logger.error(f"Error executing command: {str(e)}")
-                self.logger.error(traceback.format_exc())
-                return AIShellResult(
-                    success=False,
-                    message=f"Error executing command: {str(e)}"
-                )
+                logger.error(f"Error executing command: {str(e)}")
+                logger.error(traceback.format_exc())
+                return AIShellResult(success=False, message=f"Error executing command: {str(e)}")
+
         except Exception as e:
-            self.logger.error(f"Unexpected error in process_command: {str(e)}")
-            self.logger.error(traceback.format_exc())
+            logger.error(f"Unexpected error in process_command: {str(e)}")
+            logger.error(traceback.format_exc())
             return AIShellResult(success=False, message=f"An unexpected error occurred: {str(e)}")
 
     async def _handle_conflict(
@@ -504,3 +464,10 @@ class AIShell:
             return self.error_handler.handle_error(
                 f"An error occurred while cloning the repository: {str(e)}"
             )
+
+    async def cleanup(self):
+        """Cleanup resources."""
+        logger.info("Starting AIShell cleanup")
+        await self.command_executor.shutdown()
+        # Close any open files, database connections, etc.
+        logger.info("AIShell cleanup completed.")
