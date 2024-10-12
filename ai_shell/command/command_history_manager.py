@@ -5,9 +5,12 @@ from typing import List, Optional
 
 import aiofiles
 
+from ai_shell.utils.logger import class_logger
+
 from ..models import CommandHistoryEntry
 
 
+@class_logger
 class CommandHistoryManager:
     def __init__(self, max_history_size: int = 100) -> None:
         self.history: List[CommandHistoryEntry] = []

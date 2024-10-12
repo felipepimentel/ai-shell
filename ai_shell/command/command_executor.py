@@ -1,19 +1,24 @@
 import asyncio
 import os
-from typing import Optional, Tuple, Callable
+from typing import Callable, Optional, Tuple
 
 from ..config import config
-from ..utils.logger import get_logger
+from ..utils.logger import class_logger, get_logger
 
 logger = get_logger(__name__)
 
 TIMEOUT_EXIT_CODE = 124
 
+
 class CommandExecutionError(Exception):
     pass
 
+
+@class_logger
 class CommandExecutor:
-    def __init__(self, max_workers: Optional[int] = None, dry_run: bool = False) -> None:
+    def __init__(
+        self, max_workers: Optional[int] = None, dry_run: bool = False
+    ) -> None:
         self.max_workers = max_workers or os.cpu_count()
         self.dry_run = dry_run
 
@@ -26,12 +31,17 @@ class CommandExecutor:
         logger.info(f"Starting execution of command: {command}")
         timeout = timeout or config.default_timeout
 
+        # Extract the actual command from the AI response
+        actual_command = self._extract_command(command)
+
         try:
-            return await asyncio.wait_for(self._run_command(command), timeout=timeout)
+            return await asyncio.wait_for(
+                self._run_command(actual_command), timeout=timeout
+            )
         except asyncio.TimeoutError:
-            return self._handle_timeout_error(command, timeout)
+            return self._handle_timeout_error(actual_command, timeout)
         except Exception as e:
-            return self._handle_execution_error(command, e)
+            return self._handle_execution_error(actual_command, e)
 
     async def _run_command(self, command: str) -> Tuple[str, int]:
         process = await asyncio.create_subprocess_shell(
@@ -42,7 +52,9 @@ class CommandExecutor:
 
         return self._process_command_output(process.returncode, stdout, stderr)
 
-    def _process_command_output(self, returncode: int, stdout: bytes, stderr: bytes) -> Tuple[str, int]:
+    def _process_command_output(
+        self, returncode: int, stdout: bytes, stderr: bytes
+    ) -> Tuple[str, int]:
         output = stdout.decode().strip()
         error_output = stderr.decode().strip()
 
@@ -61,11 +73,15 @@ class CommandExecutor:
         return f"Dry run: {command}", 0
 
     def _handle_timeout_error(self, command: str, timeout: int) -> Tuple[str, int]:
-        error_message = f"Error: Command execution timed out after {timeout} seconds: {command}"
+        error_message = (
+            f"Error: Command execution timed out after {timeout} seconds: {command}"
+        )
         logger.error(error_message)
         return error_message, TIMEOUT_EXIT_CODE
 
-    def _handle_execution_error(self, command: str, exception: Exception) -> Tuple[str, int]:
+    def _handle_execution_error(
+        self, command: str, exception: Exception
+    ) -> Tuple[str, int]:
         error_message = f"Error executing command: {command}. {str(exception)}"
         logger.exception(error_message)
         raise CommandExecutionError(error_message)
@@ -77,14 +93,17 @@ class CommandExecutor:
         logger.info("CommandExecutor shutdown completed.")
 
     async def execute_long_running_command(
-        self, command: str, timeout: Optional[int] = None, progress_callback: Optional[Callable[[str], None]] = None
+        self,
+        command: str,
+        timeout: Optional[int] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Tuple[str, int]:
         process = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        
+
         output = []
         try:
             async for line in process.stdout:
@@ -95,9 +114,21 @@ class CommandExecutor:
         except asyncio.TimeoutError:
             process.terminate()
             return "Command timed out", TIMEOUT_EXIT_CODE
-        
+
         await process.wait()
         return "\n".join(output), process.returncode
 
     def report_progress(self, line: str) -> None:
         logger.info(f"Command progress: {line}")
+
+    def _extract_command(self, ai_response: str) -> str:
+        # Look for commands enclosed in backticks or code blocks
+        import re
+
+        command_match = re.search(
+            r"`{1,3}(?:bash|sh)?\s*(.*?)\s*`{1,3}", ai_response, re.DOTALL
+        )
+        if command_match:
+            return command_match.group(1)
+        # If no command is found in backticks, return the original response
+        return ai_response

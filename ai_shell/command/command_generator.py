@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from ..llm.openrouter_ai import OpenRouterAI
-from ..utils.logger import get_logger
+from ..utils.logger import class_logger, get_logger
 
 logger = get_logger(__name__)
 
@@ -13,6 +13,7 @@ class CommandGenerationError(Exception):
     pass
 
 
+@class_logger
 class CommandGenerator:
     PROMPTS_DIR = Path(__file__).parent.parent.parent / "assets" / "prompts"
     COMMAND_GENERATION_PROMPT = "command_generation"

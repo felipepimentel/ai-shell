@@ -10,8 +10,8 @@ from .command.command_generator import CommandGenerator
 from .command.command_processor import CommandProcessor
 from .config import config
 from .context_manager import ContextManager
-from .models import AIShellResult
 from .error_manager import ErrorHandler
+from .models import AIShellResult
 from .ui_handler import UIHandler
 from .utils.cache import init_cache
 from .utils.logger import get_logger, setup_logging

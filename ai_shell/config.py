@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 
 import yaml
 from dotenv import load_dotenv
+import socket
 
 load_dotenv()
 
@@ -32,6 +33,10 @@ class Config:
             "clear_history_command", "clear_history"
         )
         self.expert_mode: bool = self._config.get("expert_mode", False)
+        self.log_file_path = "ai_shell.log"
+        self.log_max_bytes = 10 * 1024 * 1024  # 10 MB
+        self.log_backup_count = 5
+        self.hostname = socket.gethostname()
 
     @staticmethod
     def _load_config(filename: str) -> Dict[str, Any]:

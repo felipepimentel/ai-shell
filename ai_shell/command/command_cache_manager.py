@@ -1,9 +1,12 @@
 from collections import OrderedDict
 from typing import Optional, Tuple
 
+from ai_shell.utils.logger import class_logger
+
 from ..utils.cache import check_cache, clean_expired_cache, save_cache
 
 
+@class_logger
 class CommandCacheManager:
     def __init__(self) -> None:
         self.command_cache: OrderedDict[str, str] = OrderedDict()

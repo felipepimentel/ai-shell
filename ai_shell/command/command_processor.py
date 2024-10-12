@@ -4,7 +4,7 @@ from typing import Optional, Tuple, TypedDict
 
 from ..config import config
 from ..context_manager import ContextManager
-from ..utils.logger import get_logger
+from ..utils.logger import class_logger, get_logger
 from .command_cache_manager import CommandCacheManager
 from .command_executor import CommandExecutor
 from .command_generator import CommandGenerationError, CommandGenerator
@@ -24,6 +24,7 @@ class CommandProcessingError(Exception):
     pass
 
 
+@class_logger
 class CommandProcessor:
     def __init__(
         self,

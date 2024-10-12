@@ -7,6 +7,7 @@ from typing import List, Tuple
 import pkg_resources
 
 from .utils.logger import get_logger
+from .utils.system_utils import run_process, check_system_dependency
 
 logger = get_logger(__name__)
 
@@ -67,17 +68,12 @@ async def install_dependency(dep: str) -> bool:
     Install a single dependency using pip.
     """
     try:
-        process = await asyncio.create_subprocess_shell(
-            f"{sys.executable} -m pip install {dep}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-        if process.returncode == 0:
+        returncode, stdout, stderr = await run_process(f"{sys.executable} -m pip install {dep}")
+        if returncode == 0:
             logger.info(f"Successfully installed {dep}")
             return True
         else:
-            logger.error(f"Failed to install {dep}. Error: {stderr.decode().strip()}")
+            logger.error(f"Failed to install {dep}. Error: {stderr.strip()}")
             return False
     except Exception as e:
         logger.error(f"Error while installing {dep}: {str(e)}")
@@ -94,24 +90,12 @@ def confirm_installation(dependency: str) -> bool:
     return response.lower() == "y"
 
 
-async def check_system_dependency(dep: str) -> bool:
-    """
-    Check if a system dependency (executable) is available.
-    """
-    return await asyncio.to_thread(shutil.which, dep) is not None
-
-
-async def resume_command_after_dependency_install(
-    original_command: str,
-) -> Tuple[bool, str, str]:
+async def resume_command_after_dependency_install(original_command: str) -> Tuple[bool, str, str]:
     """
     Resume the original command after dependency installation.
     """
-    process = await asyncio.create_subprocess_shell(
-        original_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    stdout, stderr = await process.communicate()
-    return process.returncode == 0, stdout.decode(), stderr.decode()
+    returncode, stdout, stderr = await run_process(original_command)
+    return returncode == 0, stdout, stderr
 
 
 # Additional utility functions can be added here as needed
