@@ -1,9 +1,9 @@
 import os
+import socket
 from typing import Any, Dict, List
 
 import yaml
 from dotenv import load_dotenv
-import socket
 
 load_dotenv()
 

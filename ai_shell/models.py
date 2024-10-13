@@ -40,10 +40,10 @@ class CommandGenerationError(Exception):
     pass
 
 
-class ConflictResolution(Enum):
-    REMOVE = "Remove existing and continue"
-    RENAME = "Rename and continue"
-    ABORT = "Abort operation"
+class ConflictResolution:
+    REMOVE = "remove"
+    RENAME = "rename"
+    ABORT = "abort"
 
 
 @dataclass

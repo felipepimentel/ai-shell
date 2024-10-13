@@ -5,7 +5,7 @@ import traceback
 from contextlib import asynccontextmanager
 from functools import wraps
 from logging.handlers import RotatingFileHandler
-from typing import Any
+from typing import Any, Callable
 
 import structlog
 from rich.console import Console
@@ -95,42 +95,50 @@ def log_info(message: str) -> None:
 
 
 def class_logger(cls: Any) -> Any:
-    class_name = cls.__name__
-    logger = logging.getLogger(class_name)
+    logger = get_logger(cls.__name__)
 
     for name, method in inspect.getmembers(cls, inspect.isfunction):
         if name.startswith("__"):
             continue
 
         @functools.wraps(method)
-        def create_wrapper(method):
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                logger.debug(f"Entering {class_name}.{method.__name__}")
-                try:
-                    result = method(*args, **kwargs)
-                    if inspect.iscoroutinefunction(method):
+        def wrapper(original_method: Callable) -> Callable:
+            if inspect.iscoroutinefunction(original_method):
 
-                        async def async_wrapper():
-                            try:
-                                return await result
-                            finally:
-                                logger.debug(f"Exiting {class_name}.{method.__name__}")
-
-                        return async_wrapper()
-                    else:
+                async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
+                    logger.debug(f"Entering {cls.__name__}.{original_method.__name__}")
+                    try:
+                        result = await original_method(*args, **kwargs)
+                        logger.debug(
+                            f"Exiting {cls.__name__}.{original_method.__name__}"
+                        )
                         return result
-                except Exception as e:
-                    logger.exception(
-                        f"Exception in {class_name}.{method.__name__}: {str(e)}"
-                    )
-                    raise
-                finally:
-                    if not inspect.iscoroutinefunction(method):
-                        logger.debug(f"Exiting {class_name}.{method.__name__}")
+                    except Exception as e:
+                        logger.exception(
+                            f"Exception in {cls.__name__}.{original_method.__name__}: {str(e)}"
+                        )
+                        raise
 
-            return wrapper
+                return async_wrapped
+            else:
 
-        setattr(cls, name, create_wrapper(method))
+                def sync_wrapped(*args: Any, **kwargs: Any) -> Any:
+                    logger.debug(f"Entering {cls.__name__}.{original_method.__name__}")
+                    try:
+                        result = original_method(*args, **kwargs)
+                        logger.debug(
+                            f"Exiting {cls.__name__}.{original_method.__name__}"
+                        )
+                        return result
+                    except Exception as e:
+                        logger.exception(
+                            f"Exception in {cls.__name__}.{original_method.__name__}: {str(e)}"
+                        )
+                        raise
+
+                return sync_wrapped
+
+        setattr(cls, name, wrapper(method))
 
     return cls
 
