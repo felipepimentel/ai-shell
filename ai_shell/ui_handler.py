@@ -66,7 +66,9 @@ class UIHandler:
         table = Table(show_header=False, box=None)
         for i, option in enumerate(options, 1):
             table.add_row(f"{i}.", option)
-        panel = self._create_panel(table, "Options", self.theme["ai_response"])
+        panel = self._create_panel(
+            table, "Correction Choices", self.theme["ai_response"]
+        )
         self.display_panel(panel)
         return await self._get_valid_choice(prompt, options)
 
@@ -114,15 +116,32 @@ class UIHandler:
             multiline=True,
         )
 
-    def display_command_output(self, command: str, output: str) -> None:
-        panel = self._create_panel(
-            f"{command}\n\n{output}", "Command Output", self.theme["success"]
-        )
+    def display_execution_status(self, success: bool) -> None:
+        if success:
+            self.console.print(
+                "✅ Command executed successfully.", style=self.theme["success"]
+            )
+        else:
+            self.console.print("❌ Command failed.", style=self.theme["error"])
+
+    def display_command_output(self, command: str, output: str, success: bool) -> None:
+        if success:
+            if not output.strip():
+                return
+            panel = self._create_panel(
+                f"{command}\n\n✅ Command executed successfully.",
+                "Execution Success",
+                self.theme["success"],
+            )
+        else:
+            panel = self._create_panel(
+                f"{command}\n\nOutput:\n{output}", "Command Failed", self.theme["error"]
+            )
         self.display_panel(panel)
 
     def display_error_message(self, message: str) -> None:
         panel = self._create_panel(
-            f"🚨 Error: {message}", "Error Occurred", self.theme["error"]
+            f"🚨 {message}", "Error Occurred", self.theme["error"]
         )
         self.display_panel(panel)
 

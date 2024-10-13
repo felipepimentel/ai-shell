@@ -79,16 +79,24 @@ class AIShell:
             self._append_to_history(
                 command, combined_output, ai_response, 0 if overall_success else 1
             )
+
+            if not overall_success:
+                failed_command_output = "\n".join(
+                    [
+                        f"Command: {cmd}\nOutput: {output}"
+                        for cmd, output, return_code in results
+                        if return_code != 0
+                    ]
+                )
+                await self._handle_command_error(command, failed_command_output)
+                return AIShellResult(success=False, message=failed_command_output)
+
+            self.ui_handler.display_execution_status(overall_success)
+
             return AIShellResult(success=overall_success, message=combined_output)
 
         except asyncio.TimeoutError:
             error_message = f"Timeout occurred while processing the command: {command}"
-            logger.error(error_message, exc_info=True)
-            self.ui_handler.display_error_message(error_message)
-            return AIShellResult(success=False, message=error_message)
-
-        except asyncio.CancelledError:
-            error_message = f"The operation was cancelled: {command}"
             logger.error(error_message, exc_info=True)
             self.ui_handler.display_error_message(error_message)
             return AIShellResult(success=False, message=error_message)
@@ -102,9 +110,19 @@ class AIShell:
     async def _get_ai_response(self, command: str) -> str:
         logger.info(f"Sending command to LLM: {command}")
         full_prompt = f"{self.command_generation_prompt}\n\nUser Command: {command}"
-        ai_response = await self.ai.generate(full_prompt)
-        logger.info(f"Full LLM response: {ai_response}")
-        return ai_response
+
+        try:
+            ai_response = await asyncio.wait_for(
+                self.ai.generate(full_prompt), timeout=30
+            )
+            logger.info(f"Full LLM response: {ai_response}")
+            return ai_response
+        except asyncio.TimeoutError:
+            logger.error(f"LLM response timed out for command: {command}")
+            return "Error: Timeout occurred while waiting for LLM response."
+        except Exception as e:
+            logger.error(f"Error occurred while getting LLM response: {str(e)}")
+            return f"Error: Failed to get response from LLM. Details: {str(e)}"
 
     async def _execute_commands(
         self, commands: List[str]
@@ -171,38 +189,59 @@ class AIShell:
         except asyncio.TimeoutError:
             logger.warning(f"Timeout showing progress: {message}")
 
-    def _append_to_history(
-        self, command: str, output: str, ai_response: str, return_code: int
-    ):
-        entry = HistoryEntry(
-            command=command,
-            output=output,
-            ai_response=ai_response,
-            status="Success" if return_code == 0 else "Failed",
-            timestamp=datetime.now().isoformat(),
-        )
-        self.history.append(entry)
-        if len(self.history) > self.max_history_size:
-            self.history.pop(0)
-        asyncio.create_task(self._save_history())
+    async def _handle_command_error(self, command: str, error_output: str):
+        error_analysis_prompt = f"Analyze the following error and suggest possible corrections:\n\nError:\n{error_output}\n\nCommand:\n{command}\n\nProvide options such as 'Recreate repository', 'Update repository', 'Skip', or others as appropriate, with commands to fix the issue."
 
-    async def _save_history(self):
-        async with aiofiles.open("ai_command_history.json", "w") as f:
-            await f.write(
-                json.dumps(
-                    [
-                        {
-                            "command": entry.command,
-                            "output": entry.output,
-                            "ai_response": entry.ai_response,
-                            "status": entry.status,
-                            "timestamp": entry.timestamp,
-                        }
-                        for entry in self.history
-                    ],
-                    indent=2,
-                )
+        logger.info(f"Generating error analysis for: {command}")
+
+        error_suggestions = await self._get_ai_response(error_analysis_prompt)
+
+        if not error_suggestions.strip():
+            self.ui_handler.display_error_message(
+                "🚨 No response from AI. Please try again later."
             )
+            return
+
+        logger.info(f"Error analysis suggestions: {error_suggestions}")
+
+        options_with_commands = self._extract_options_with_commands(error_suggestions)
+
+        if not options_with_commands:
+            self.ui_handler.display_error_message(
+                "🚨 No correction options found. Please try again later."
+            )
+            return
+
+        options = list(options_with_commands.keys())
+        choice = await self.ui_handler.get_choice("Choose a correction:", options)
+
+        if choice:
+            selected_commands = options_with_commands.get(choice, [])
+            if selected_commands:
+                for cmd in selected_commands:
+                    await self._execute_command(cmd)
+            else:
+                self.ui_handler.display_success_message("Action skipped successfully.")
+
+    def _extract_options_with_commands(self, ai_response: str) -> Dict[str, List[str]]:
+        options_with_commands = {}
+
+        if not ai_response.strip():
+            logger.error("LLM response is empty.")
+            return options_with_commands
+
+        matches = re.findall(r"Option:\s*(.*?)\nCommands:\s*((?:.+\n?)*)", ai_response)
+        if not matches:
+            logger.error("No valid options found in LLM response.")
+            return options_with_commands
+
+        for option, commands in matches:
+            commands_list = [
+                cmd.strip() for cmd in commands.splitlines() if cmd.strip()
+            ]
+            options_with_commands[option] = commands_list
+
+        return options_with_commands
 
     def _get_internal_commands(self) -> Dict[str, Callable[[], None]]:
         return {
@@ -268,3 +307,41 @@ class AIShell:
                 f"Error loading history: {str(e)}. Starting with an empty history."
             )
             self.history = []
+
+    def _append_to_history(
+        self, command: str, output: str, ai_response: str, return_code: int
+    ):
+        entry = HistoryEntry(
+            command=command,
+            output=output,
+            ai_response=ai_response,
+            status="Success" if return_code == 0 else "Failed",
+            timestamp=datetime.now().isoformat(),
+        )
+        self.history.append(entry)
+        if len(self.history) > self.max_history_size:
+            self.history.pop(0)
+        asyncio.create_task(self._save_history())
+
+    async def _save_history(self):
+        history_file = "ai_command_history.json"
+        try:
+            async with aiofiles.open(history_file, "w") as f:
+                await f.write(
+                    json.dumps(
+                        [
+                            {
+                                "command": entry.command,
+                                "output": entry.output,
+                                "ai_response": entry.ai_response,
+                                "status": entry.status,
+                                "timestamp": entry.timestamp,
+                            }
+                            for entry in self.history
+                        ],
+                        indent=2,
+                    )
+                )
+            logger.info(f"History saved to {history_file}")
+        except Exception as e:
+            logger.error(f"Error saving history: {str(e)}")
