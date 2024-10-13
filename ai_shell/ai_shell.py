@@ -16,6 +16,21 @@ from .utils.logger import class_logger, get_logger
 logger = get_logger("ai_shell")
 
 
+def load_prompt(prompt_name: str) -> str:
+    prompt_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "assets", "prompts", prompt_name
+    )
+    try:
+        with open(prompt_path, "r") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        logger.error(f"Prompt file not found: {prompt_name}")
+        return ""
+    except IOError as e:
+        logger.error(f"Error reading prompt file {prompt_name}: {str(e)}")
+        return ""
+
+
 @class_logger
 class AIShell:
     def __init__(self, ui_handler: UIHandler, max_history_size: int = 100):
@@ -24,6 +39,8 @@ class AIShell:
         self.history = []
         self.config = config
         self.ai = ai
+        self.command_generation_prompt = load_prompt("command_generation.md")
+        self.error_resolution_prompt = load_prompt("error_resolution.md")
 
     async def initialize(self):
         await self._load_history()
@@ -84,7 +101,8 @@ class AIShell:
 
     async def _get_ai_response(self, command: str) -> str:
         logger.info(f"Sending command to LLM: {command}")
-        ai_response = await self.ai.generate(command)
+        full_prompt = f"{self.command_generation_prompt}\n\nUser Command: {command}"
+        ai_response = await self.ai.generate(full_prompt)
         logger.info(f"Full LLM response: {ai_response}")
         return ai_response
 
@@ -99,22 +117,15 @@ class AIShell:
                 f"Command execution result - Command: {cmd}, Output: {output}, Return code: {return_code}"
             )
             results.append((cmd, output, return_code))
-            self.ui_handler.display_command_output(cmd, output)
         return results
 
     def _format_results(self, results: List[Tuple[str, str, int]]) -> str:
         return "\n".join(
-            [f"Command: {cmd}\nOutput: {output}\n" for cmd, output, _ in results]
+            [f"Command: {cmd}\nOutput: {output}" for cmd, output, _ in results]
         )
 
     def _extract_commands(self, ai_response: str) -> List[str]:
         commands = re.findall(r"```(?:bash)?\n(.*?)\n```", ai_response, re.DOTALL)
-        commands = [
-            line.strip()
-            for block in commands
-            for line in block.split("\n")
-            if line.strip()
-        ]
 
         if not commands:
             commands = re.findall(
@@ -123,7 +134,12 @@ class AIShell:
                 re.MULTILINE,
             )
 
-        return [cmd.strip() for cmd in commands if cmd.strip()]
+        commands = [cmd.strip() for cmd in commands if cmd.strip()]
+
+        if not commands:
+            logger.error("No executable commands found in AI response.")
+
+        return commands
 
     async def _execute_command(
         self, command: str, timeout: int = 60
