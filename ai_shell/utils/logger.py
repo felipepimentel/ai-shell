@@ -1,9 +1,11 @@
+import functools
 import inspect
 import logging
 import traceback
 from contextlib import asynccontextmanager
 from functools import wraps
 from logging.handlers import RotatingFileHandler
+from typing import Any
 
 import structlog
 from rich.console import Console
@@ -92,9 +94,44 @@ def log_info(message: str) -> None:
     logger.info(message)
 
 
-def class_logger(cls):
-    for name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
-        setattr(cls, name, function_logger(method))
+def class_logger(cls: Any) -> Any:
+    class_name = cls.__name__
+    logger = logging.getLogger(class_name)
+
+    for name, method in inspect.getmembers(cls, inspect.isfunction):
+        if name.startswith("__"):
+            continue
+
+        @functools.wraps(method)
+        def create_wrapper(method):
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                logger.debug(f"Entering {class_name}.{method.__name__}")
+                try:
+                    result = method(*args, **kwargs)
+                    if inspect.iscoroutinefunction(method):
+
+                        async def async_wrapper():
+                            try:
+                                return await result
+                            finally:
+                                logger.debug(f"Exiting {class_name}.{method.__name__}")
+
+                        return async_wrapper()
+                    else:
+                        return result
+                except Exception as e:
+                    logger.exception(
+                        f"Exception in {class_name}.{method.__name__}: {str(e)}"
+                    )
+                    raise
+                finally:
+                    if not inspect.iscoroutinefunction(method):
+                        logger.debug(f"Exiting {class_name}.{method.__name__}")
+
+            return wrapper
+
+        setattr(cls, name, create_wrapper(method))
+
     return cls
 
 

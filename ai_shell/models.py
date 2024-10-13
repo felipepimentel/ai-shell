@@ -34,3 +34,22 @@ class ErrorType(Enum):
 class AIShellResult:
     success: bool
     message: str
+
+
+class CommandGenerationError(Exception):
+    pass
+
+
+class ConflictResolution(Enum):
+    REMOVE = "Remove existing and continue"
+    RENAME = "Rename and continue"
+    ABORT = "Abort operation"
+
+
+@dataclass
+class HistoryEntry:
+    command: str
+    output: str
+    ai_response: str
+    status: str
+    timestamp: str
