@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from datetime import datetime
 from typing import Callable, Dict, List, Tuple
 
@@ -41,6 +42,7 @@ class AIShell:
         self.ai = ai
         self.command_generation_prompt = load_prompt("command_generation.md")
         self.error_resolution_prompt = load_prompt("error_resolution.md")
+        self.context = []
 
     async def initialize(self):
         await self._load_history()
@@ -51,49 +53,26 @@ class AIShell:
 
         try:
             logger.info("Starting command processing")
-            await self._show_progress_with_timeout(
-                "Generating AI response...", timeout=5
+            self.ui_handler.display_thinking()
+
+            ai_response = await self.ui_handler.execute_with_progress(
+                "Generating AI response...", self._get_ai_response(command)
             )
-
-            logger.info(f"Generating AI response for command: {command}")
-            ai_response = await self._get_ai_response(command)
-            logger.info("AI response received")
-
             self.ui_handler.display_ai_response(ai_response)
-            logger.info("AI response displayed")
 
             extracted_commands = self._extract_commands(ai_response)
-            logger.info(f"Extracted commands: {extracted_commands}")
-
             if not extracted_commands:
                 return AIShellResult(
                     success=False,
                     message="No executable commands found in AI response.",
                 )
 
-            results = await self._execute_commands(extracted_commands)
+            await self._confirm_and_execute_commands(extracted_commands)
 
-            combined_output = self._format_results(results)
-            overall_success = all(return_code == 0 for _, _, return_code in results)
-
-            self._append_to_history(
-                command, combined_output, ai_response, 0 if overall_success else 1
+            self._update_context(command, ai_response)
+            return AIShellResult(
+                success=True, message="Command processed successfully."
             )
-
-            if not overall_success:
-                failed_command_output = "\n".join(
-                    [
-                        f"Command: {cmd}\nOutput: {output}"
-                        for cmd, output, return_code in results
-                        if return_code != 0
-                    ]
-                )
-                await self._handle_command_error(command, failed_command_output)
-                return AIShellResult(success=False, message=failed_command_output)
-
-            self.ui_handler.display_execution_status(overall_success)
-
-            return AIShellResult(success=overall_success, message=combined_output)
 
         except asyncio.TimeoutError:
             error_message = f"Timeout occurred while processing the command: {command}"
@@ -106,10 +85,13 @@ class AIShell:
             logger.error(error_message, exc_info=True)
             self.ui_handler.display_error_message(error_message)
             return AIShellResult(success=False, message=error_message)
+        finally:
+            self.ui_handler.clear_thinking()
 
     async def _get_ai_response(self, command: str) -> str:
         logger.info(f"Sending command to LLM: {command}")
-        full_prompt = f"{self.command_generation_prompt}\n\nUser Command: {command}"
+        context_prompt = "\n".join(self.context[-5:])  # Use last 5 context entries
+        full_prompt = f"{self.command_generation_prompt}\n\nContext:\n{context_prompt}\n\nUser Command: {command}"
 
         try:
             ai_response = await asyncio.wait_for(
@@ -124,62 +106,68 @@ class AIShell:
             logger.error(f"Error occurred while getting LLM response: {str(e)}")
             return f"Error: Failed to get response from LLM. Details: {str(e)}"
 
-    async def _execute_commands(
-        self, commands: List[str]
-    ) -> List[Tuple[str, str, int]]:
-        results = []
+    async def _confirm_and_execute_commands(self, commands: List[str]):
         for cmd in commands:
-            await self._show_progress_with_timeout(f"Executing: {cmd}", timeout=5)
-            output, return_code = await self._execute_command(cmd)
-            logger.info(
-                f"Command execution result - Command: {cmd}, Output: {output}, Return code: {return_code}"
+            self.ui_handler.display_panel(
+                self.ui_handler._create_panel(
+                    f"Proposed command: {cmd}",
+                    "Confirmation",
+                    self.ui_handler.theme["ai_response"],
+                )
             )
-            results.append((cmd, output, return_code))
-        return results
+            choice = await self.ui_handler.confirm_execution()
 
-    def _format_results(self, results: List[Tuple[str, str, int]]) -> str:
-        return "\n".join(
-            [f"Command: {cmd}\nOutput: {output}" for cmd, output, _ in results]
+            if choice.lower() == "q":
+                break
+            elif choice.lower() == "e":
+                cmd = await self.ui_handler.edit_command(cmd)
+
+            if choice.lower() != "q":
+                await self._execute_and_display_command(cmd)
+
+    async def _execute_and_display_command(self, cmd: str):
+        (
+            output,
+            return_code,
+            execution_time,
+        ) = await self.ui_handler.execute_with_progress(
+            f"Executing: {cmd}", self._execute_command(cmd)
         )
+        self.ui_handler.display_command_output(
+            cmd, output, return_code == 0, execution_time
+        )
+        self._append_to_history(cmd, output, "", return_code)
 
-    def _extract_commands(self, ai_response: str) -> List[str]:
-        commands = re.findall(r"```(?:bash)?\n(.*?)\n```", ai_response, re.DOTALL)
-
-        if not commands:
-            commands = re.findall(
-                r"^[\$\s]*(git\s+\S.*|mkdir\s+.*|cd\s+.*|touch\s+.*|rm\s+.*|mv\s+.*|cp\s+.*|ls\s+.*|cat\s+.*|echo\s+.*|python\s+.*|pip\s+.*|npm\s+.*|yarn\s+.*)",
-                ai_response,
-                re.MULTILINE,
-            )
-
-        commands = [cmd.strip() for cmd in commands if cmd.strip()]
-
-        if not commands:
-            logger.error("No executable commands found in AI response.")
-
-        return commands
+    def _update_context(self, command: str, ai_response: str):
+        self.context.append(f"User: {command}")
+        self.context.append(f"AI: {ai_response}")
+        if len(self.context) > 20:  # Keep last 20 interactions
+            self.context = self.context[-20:]
 
     async def _execute_command(
         self, command: str, timeout: int = 60
-    ) -> Tuple[str, int]:
+    ) -> Tuple[str, int, float]:
         try:
             logger.info(f"Starting execution of command: {command}")
+            start_time = time.time()
             process = await asyncio.create_subprocess_shell(
                 command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(), timeout=timeout
             )
+            end_time = time.time()
+            execution_time = end_time - start_time
             output = stdout.decode().strip() or stderr.decode().strip()
             logger.info(
                 f"Command execution completed. Return code: {process.returncode}"
             )
-            return output, process.returncode
+            return output, process.returncode, execution_time
         except asyncio.TimeoutError:
             logger.error(
                 f"Command execution timed out after {timeout} seconds: {command}"
             )
-            return f"Command execution timed out after {timeout} seconds", 124
+            return f"Command execution timed out after {timeout} seconds", 124, timeout
 
     async def _show_progress_with_timeout(self, message: str, timeout: int):
         try:
@@ -345,3 +333,25 @@ class AIShell:
             logger.info(f"History saved to {history_file}")
         except Exception as e:
             logger.error(f"Error saving history: {str(e)}")
+
+    def _extract_commands(self, ai_response: str) -> List[str]:
+        commands = re.findall(r"```(?:bash)?\n(.*?)\n```", ai_response, re.DOTALL)
+
+        if not commands:
+            commands = re.findall(
+                r"^[\$\s]*(git\s+\S.*|mkdir\s+.*|cd\s+.*|touch\s+.*|rm\s+.*|mv\s+.*|cp\s+.*|ls\s+.*|cat\s+.*|echo\s+.*|python\s+.*|pip\s+.*|npm\s+.*|yarn\s+.*)",
+                ai_response,
+                re.MULTILINE,
+            )
+
+        commands = [cmd.strip() for cmd in commands if cmd.strip()]
+
+        if not commands:
+            logger.error("No executable commands found in AI response.")
+
+        return commands
+
+    def _format_results(self, results: List[Tuple[str, str, int]]) -> str:
+        return "\n".join(
+            [f"Command: {cmd}\nOutput: {output}" for cmd, output, _ in results]
+        )
